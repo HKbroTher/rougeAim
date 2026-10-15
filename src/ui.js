@@ -1,6 +1,6 @@
 // DOM 界面：HUD 与各个全屏界面。按钮通过 data-action 统一派发给 game。
 import { RELICS } from './relics.js';
-import { META_UPGRADES, BOTS, WAVES, FOCUS, SHOP, SETTLEMENT } from './config.js';
+import { META_UPGRADES, BOTS, WAVES, FOCUS, SHOP, SETTLEMENT, WEAPON } from './config.js';
 import { upgradeLevel, nextUpgradeCost, shopStats } from './meta.js';
 import * as R from './run.js';
 
@@ -33,6 +33,11 @@ export class UI {
   hideScreen() {
     this.screen.hidden = true;
     this.screen.innerHTML = '';
+  }
+
+  endCombatFx() {
+    $('view').classList.remove('slowmo');
+    $('focus-overlay').classList.remove('on');
   }
 
   showHud(on) {
@@ -75,13 +80,14 @@ export class UI {
           <div class="keys">
             <kbd>鼠标</kbd><span>360° 转动视角（站在原地不能移动）</span>
             <kbd>左键</kbd><span>射击（按住连发）</span>
-            <kbd>右键 / E / 空格</kbd><span>释放专注：${FOCUS.duration} 秒内打空不断连</span>
+            <kbd>R</kbd><span>换弹（弹匣 ${WEAPON.magSize} 发，${WEAPON.reloadTime} 秒；打空弹匣会自动换弹）</span>
+            <kbd>右键 / E / 空格</kbd><span>释放专注：${FOCUS.duration} 秒子弹时间，敌人减速到 ${Math.round(FOCUS.timeScale * 100)}%，你的转身、射速、换弹不受影响</span>
             <kbd>Esc</kbd><span>暂停</span>
           </div>
           <h3>规则</h3>
           <ul class="small" style="padding-left:18px;margin:0">
             <li>连续命中提升<b>倍率</b>，倍率越高击杀掉落金币越多。<b style="color:var(--danger)">打空一枪倍率清零</b>。</li>
-            <li>爆头伤害 ×2，并额外 +1 连杀。</li>
+            <li>爆头伤害 ×2，并额外 +1 连杀。打空的子弹同样消耗弹匣，换弹期间不能开火。</li>
             <li>共 ${WAVES.length} 波。每波后免费三选一遗物，再进商店：<span class="goldtxt">回血 / 遗物 / 星尘</span>。</li>
             <li>星尘是局外货币：买了这局变弱，下一局受益。越深的商店兑换越多。</li>
           </ul>
@@ -330,8 +336,20 @@ export class UI {
     $('focus-fill').style.width = active ? `${(run.focusTime / R.focusDuration(run)) * 100}%` : `${(run.focus / FOCUS.max) * 100}%`;
     fw.classList.toggle('ready', ready);
     fw.classList.toggle('active', active);
-    $('focus-hint').textContent = active ? `专注中 ${run.focusTime.toFixed(1)}s —— 打空不断连` : ready ? '专注就绪：右键 / E / 空格' : '专注充能中（命中充能）';
+    $('focus-hint').textContent = active ? `子弹时间 ${run.focusTime.toFixed(1)}s` : ready ? '子弹时间就绪：右键 / E / 空格' : '专注充能中（命中充能）';
     $('focus-overlay').classList.toggle('on', active);
+    $('view').classList.toggle('slowmo', active);
+    const mag = R.magSize(run);
+    const rl = R.reloading(run);
+    $('ammo-val').textContent = rl ? '—' : run.ammo;
+    $('ammo-max').textContent = mag;
+    $('ammo').classList.toggle('low', !rl && run.ammo <= Math.ceil(mag * 0.3));
+    const hint = $('ammo-hint');
+    hint.textContent = rl ? `换弹中 ${run.reloadLeft.toFixed(1)}s` : 'R 换弹';
+    hint.classList.toggle('reloading', rl);
+    const ring = $('reload-ring');
+    ring.classList.toggle('on', rl);
+    if (rl) ring.style.setProperty('--p', 1 - run.reloadLeft / WEAPON.reloadTime);
     $('vignette').classList.toggle('low', run.hp / run.maxHp < 0.3);
   }
 

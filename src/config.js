@@ -12,6 +12,8 @@ export const PLAYER = {
 export const WEAPON = {
   name: '制式步枪',
   fireInterval: 0.14,      // 秒，按住可连发
+  magSize: 10,             // 弹匣容量：打空的子弹同样消耗弹药
+  reloadTime: 1.6,         // 秒，打空弹匣自动换弹，R 键手动换弹
   damage: 1,
   headshotMultiplier: 2,
   range: 200,
@@ -28,7 +30,9 @@ export const FOCUS = {
   max: 20,                 // 充满所需点数
   perHit: 1,
   perHeadshot: 2,
-  duration: 4,             // 秒：期间打空不断连
+  duration: 4,             // 秒（真实时间）：子弹时间持续时长
+  timeScale: 0.3,          // 子弹时间内敌人 / 出怪的时间流速
+  ramp: 0.2,               // 进入和退出子弹时间的过渡（秒）
 };
 
 // 每种 bot 对应一种瞄准能力

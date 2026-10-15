@@ -1,5 +1,5 @@
 // 单局状态与规则（不依赖渲染，便于单测和平衡模拟）。
-import { PLAYER, COMBO, FOCUS, SHOP, WAVES } from './config.js';
+import { PLAYER, WEAPON, COMBO, FOCUS, SHOP, WAVES } from './config.js';
 import { RELICS, relicPool, pickRelics } from './relics.js';
 import { upgradeLevel, unlockedRelics } from './meta.js';
 
@@ -14,6 +14,8 @@ export function createRun(save) {
     maxCombo: 0,
     focus: 0,
     focusTime: 0,
+    ammo: WEAPON.magSize,
+    reloadLeft: 0,
     relics: [],
     unlocked: unlockedRelics(save),
     extraChoice: upgradeLevel(save, 'extraChoice') > 0,
@@ -24,7 +26,7 @@ export function createRun(save) {
     stardustFromShop: 0,
     safetyUsed: false,
     chainStacks: 0,
-    stats: { shots: 0, hits: 0, headshots: 0, kills: 0, goldEarned: 0, damageTaken: 0, misses: 0, comboBreaks: 0 },
+    stats: { shots: 0, hits: 0, headshots: 0, kills: 0, goldEarned: 0, damageTaken: 0, misses: 0, comboBreaks: 0, reloads: 0 },
     shopVisits: [],
   };
 }
@@ -37,6 +39,28 @@ export function multiplier(run) {
 
 export function fireInterval(run, base) {
   return base / (1 + 0.12 * run.chainStacks);
+}
+
+export function magSize(run) {
+  return WEAPON.magSize + (has(run, 'extmag') ? 5 : 0);
+}
+
+export const reloading = (run) => run.reloadLeft > 0;
+
+export function startReload(run) {
+  if (reloading(run) || run.ammo >= magSize(run)) return false;
+  run.reloadLeft = WEAPON.reloadTime;
+  run.stats.reloads++;
+  return true;
+}
+
+// 返回 true 表示本帧换弹完成
+export function tickReload(run, dt) {
+  if (!reloading(run)) return false;
+  run.reloadLeft = Math.max(0, run.reloadLeft - dt);
+  if (run.reloadLeft > 0) return false;
+  run.ammo = magSize(run);
+  return true;
 }
 
 export function focusDuration(run) {
@@ -56,6 +80,7 @@ export function registerHit(run, headshot) {
     run.stats.headshots++;
     gain += COMBO.perHeadshotBonus + (has(run, 'hawkeye') ? 1 : 0);
     if (has(run, 'chainhead')) run.chainStacks = Math.min(4, run.chainStacks + 1);
+    if (has(run, 'quickload')) run.ammo = Math.min(magSize(run), run.ammo + 1);
   } else {
     run.chainStacks = 0;
   }
@@ -64,12 +89,11 @@ export function registerHit(run, headshot) {
   addFocus(run, headshot ? FOCUS.perHeadshot : FOCUS.perHit);
 }
 
-// 返回 'protected' | 'safety' | 'broken' | 'none'
+// 返回 'safety' | 'broken' | 'none'
 export function registerMiss(run) {
   run.stats.misses++;
   run.chainStacks = 0;
   if (run.combo === 0) return 'none';
-  if (run.focusTime > 0) return 'protected';
   if (has(run, 'safety') && !run.safetyUsed) {
     run.safetyUsed = true;
     return 'safety';
@@ -115,6 +139,9 @@ export function takeDamage(run, dmg) {
 
 export function startWave(run) {
   run.safetyUsed = false;
+  run.ammo = magSize(run);
+  run.reloadLeft = 0;
+  run.focusTime = 0;
   if (has(run, 'waveshield')) run.shield++;
 }
 
