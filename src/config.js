@@ -61,15 +61,53 @@ export const ARENA = {
   spawnRadius: 30,
 };
 
-// 波次：count 为各类型数量，interval 为平均出怪间隔，arc 为出怪角度范围（度），
-// speedMul 为该波速度倍率。早期波次只从正前方一侧出现，后期 360°。
-export const WAVES = [
-  { name: '第 1 波', count: { normal: 8 }, interval: 1.3, arc: 120, speedMul: 1.0 },
-  { name: '第 2 波', count: { normal: 10, charger: 4 }, interval: 1.0, arc: 200, speedMul: 1.0 },
-  { name: '第 3 波', count: { normal: 10, charger: 6, heavy: 2 }, interval: 0.9, arc: 280, speedMul: 1.08 },
-  { name: '第 4 波', count: { normal: 12, charger: 9, heavy: 3 }, interval: 0.75, arc: 360, speedMul: 1.15 },
-  { name: '第 5 波', count: { normal: 14, charger: 12, heavy: 5 }, interval: 0.6, arc: 360, speedMul: 1.22 },
-];
+// 视野外的 bot 进入该距离时，在屏幕边缘对应方向亮起红光，越近越亮、闪得越快
+export const THREAT = {
+  range: 11,
+};
+
+// ---------------- 波次：20 波，由公式平滑生成 ----------------
+// 难度只来自敌人本身：数量、速度、出怪密度、出怪扇区、兵种比例。
+// bot 血量不随波次成长，保证「一发爆头秒普通兵」的手感从头到尾不变。
+export const WAVE_COUNT = 20;
+
+export const WAVE_CURVE = {
+  countBase: 8,          // 第 1 波敌人数
+  countLinear: 1.6,      // 每波线性增加
+  countQuad: 0.06,       // 二次项，让后期密度加速上升
+  intervalBase: 1.3,     // 第 1 波平均出怪间隔（秒）
+  intervalDecay: 0.93,   // 每波乘以该系数
+  intervalMin: 0.35,
+  speedPerWave: 0.02,    // 每波敌人速度 +2%（第 20 波 1.38x）
+  arcBase: 120,          // 第 1 波出怪扇区（度）
+  arcPerWave: 40,        // 每波扩大，第 7 波起 360°
+  chargerFrom: 2, chargerPerWave: 0.035, chargerMax: 0.38,
+  heavyFrom: 3, heavyPerWave: 0.012, heavyMax: 0.2,
+};
+
+function makeWave(n) {
+  const c = WAVE_CURVE;
+  const k = n - 1;
+  const total = Math.round(c.countBase + c.countLinear * k + c.countQuad * k * k);
+  const chargerShare = n >= c.chargerFrom ? Math.min(c.chargerMax, 0.12 + c.chargerPerWave * (n - c.chargerFrom)) : 0;
+  const heavyShare = n >= c.heavyFrom ? Math.min(c.heavyMax, 0.06 + c.heavyPerWave * (n - c.heavyFrom)) : 0;
+  const charger = Math.round(total * chargerShare);
+  const heavy = Math.max(n >= c.heavyFrom ? 1 : 0, Math.round(total * heavyShare));
+  const count = { normal: total - charger - heavy };
+  if (charger) count.charger = charger;
+  if (heavy) count.heavy = heavy;
+  return {
+    n,
+    name: `第 ${n} 波`,
+    count,
+    total,
+    interval: Math.max(c.intervalMin, c.intervalBase * c.intervalDecay ** k),
+    arc: Math.min(360, c.arcBase + c.arcPerWave * k),
+    speedMul: 1 + c.speedPerWave * k,
+  };
+}
+
+export const WAVES = Array.from({ length: WAVE_COUNT }, (_, i) => makeWave(i + 1));
 
 export const SHOP = {
   // 回血：价格随本局购买次数上涨
@@ -82,8 +120,11 @@ export const SHOP = {
   // 星尘：比同档遗物贵，同一局越买越贵，越深的商店兑换越多
   stardustBasePrice: 55,
   stardustPriceStep: 25,
-  stardustYieldBase: 10,
-  stardustYieldPerDepth: 8, // depth = 已通过的波数
+  stardustYieldBase: 14,
+  stardustYieldPerDepth: 6, // depth = 已通过的波数
+  // 所有金币价格（含每次购买的涨价幅度）乘以 1 + priceGrowth × depth，
+  // 与每波收入的增长大致同步；星尘兑换量的增长更快，所以越深兑换比例越好。
+  priceGrowth: 0.12,
   // 哪些商店卖星尘（按商店序号，从 1 开始）。设为 null 表示全部商店都卖。
   stardustShops: null,
   discountRelic: 0.8, // 「会员卡」折扣
@@ -91,10 +132,10 @@ export const SHOP = {
 
 // 结算星尘：按技术表现而不是存活时间
 export const SETTLEMENT = {
-  perMaxCombo: 0.3,
+  comboSqrt: 6,          // 6 × √最高连杀：连杀越长越好，但边际递减，防止无限连杀刷爆星尘
   perHeadshot: 0.25,
-  perWave: 8,
-  victoryBonus: 30,
+  perWave: 5,
+  victoryBonus: 50,
 };
 
 // 局外星尘工坊：解锁为主，数值只给宽容度且有上限

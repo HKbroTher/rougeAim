@@ -1,6 +1,6 @@
 // 单局状态与规则（不依赖渲染，便于单测和平衡模拟）。
 import { PLAYER, WEAPON, COMBO, FOCUS, SHOP, WAVES } from './config.js';
-import { RELICS, relicPool, pickRelics } from './relics.js';
+import { RELICS, SUPPLIES, relicPool, pickRelics } from './relics.js';
 import { upgradeLevel, unlockedRelics } from './meta.js';
 
 export function createRun(save) {
@@ -152,18 +152,33 @@ export function enemySpeedMul(run) {
 // ---------- 遗物三选一 ----------
 
 export function rollRewardChoices(run, n = 3) {
-  return pickRelics(relicPool(run.unlocked, run.relics), n);
+  const picks = pickRelics(relicPool(run.unlocked, run.relics), n);
+  const supplies = [...SUPPLIES].sort(() => Math.random() - 0.5);
+  while (picks.length < n && supplies.length) picks.push(supplies.pop());
+  return picks;
+}
+
+export function supplyGold(run) {
+  return Math.round(25 * priceScale(run));
 }
 
 export function addRelic(run, id) {
-  if (!run.relics.includes(id)) run.relics.push(id);
+  if (id === 'sup_gold') run.gold += supplyGold(run);
+  else if (id === 'sup_heal') run.hp = Math.min(run.maxHp, run.hp + 40);
+  else if (id === 'sup_maxhp') { run.maxHp += 10; run.hp += 10; }
+  else if (!run.relics.includes(id)) run.relics.push(id);
 }
 
 // ---------- 商店 ----------
 
+// 价格随深度平滑上涨，与每波收入增长同步
+export function priceScale(run) {
+  return 1 + SHOP.priceGrowth * run.waveIndex;
+}
+
 export function healPrice(run) {
   const step = has(run, 'clinic') ? 0 : SHOP.healPriceStep;
-  return SHOP.healBasePrice + step * run.healBuys;
+  return Math.round((SHOP.healBasePrice + step * run.healBuys) * priceScale(run));
 }
 
 export function healAmount(run) {
@@ -172,7 +187,7 @@ export function healAmount(run) {
 
 export function relicPrice(run, id) {
   const base = SHOP.relicPrice[RELICS[id].rarity];
-  return Math.round(base * (has(run, 'membercard') ? SHOP.discountRelic : 1));
+  return Math.round(base * priceScale(run) * (has(run, 'membercard') ? SHOP.discountRelic : 1));
 }
 
 export function shopSellsStardust(shopNumber) {
@@ -180,7 +195,7 @@ export function shopSellsStardust(shopNumber) {
 }
 
 export function stardustPrice(run) {
-  return SHOP.stardustBasePrice + SHOP.stardustPriceStep * run.stardustBuys;
+  return Math.round((SHOP.stardustBasePrice + SHOP.stardustPriceStep * run.stardustBuys) * priceScale(run));
 }
 
 export function stardustYield(run) {
