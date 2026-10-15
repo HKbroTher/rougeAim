@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RogueAim 原型</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <canvas id="view"></canvas>
+
+  <div id="hud" hidden>
+    <div id="vignette"></div>
+    <div id="focus-overlay"></div>
+    <div id="hurtdir"></div>
+
+    <div id="crosshair">
+      <span class="ch ch-t"></span><span class="ch ch-b"></span>
+      <span class="ch ch-l"></span><span class="ch ch-r"></span>
+      <div id="hitmarker"></div>
+    </div>
+
+    <div id="hud-tl" class="panel">
+      <div class="hp-row">
+        <div id="hp-bar"><div id="hp-fill"></div><span id="hp-text"></span></div>
+        <div id="shield"></div>
+      </div>
+      <div id="relic-bar"></div>
+    </div>
+
+    <div id="hud-tr" class="panel">
+      <div id="wave-label"></div>
+      <div id="enemies-left"></div>
+      <div id="gold"><span class="coin">●</span> <span id="gold-val">0</span></div>
+    </div>
+
+    <div id="hud-bottom">
+      <div id="combo-box">
+        <div id="mult">1.0x</div>
+        <div id="combo">连杀 0</div>
+      </div>
+      <div id="focus-wrap">
+        <div id="focus-bar"><div id="focus-fill"></div></div>
+        <div id="focus-hint">专注充能中</div>
+      </div>
+    </div>
+
+    <canvas id="radar" width="180" height="180"></canvas>
+    <div id="floaters"></div>
+    <div id="banner"></div>
+  </div>
+
+  <div id="screen" class="overlay"></div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
