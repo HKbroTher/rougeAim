@@ -1,5 +1,5 @@
 // 局外存档：星尘、工坊等级、设置、枪法档案与商店决策日志（用于调价）。
-import { META_UPGRADES } from './config.js';
+import { META_UPGRADES, KEEPSAKES } from './config.js';
 
 const KEY = 'rougeaim.save.v1';
 const MAX_RUNS = 50;
@@ -8,6 +8,8 @@ function defaults() {
   return {
     stardust: 0,
     upgrades: {},            // id -> level
+    keepsakes: { hunter: 1, drum: 1, watch: 1 }, // 遗物 id -> 等级（三个流派遗物 1 级默认拥有）
+    keepsake: null,          // 本局携带的遗物
     settings: { sensitivity: 1.0, volume: 0.5 },
     runs: [],                // 每局摘要（枪法档案）
     shopLog: [],             // 每次进商店的决策记录
@@ -56,8 +58,32 @@ export function buyUpgrade(save, id) {
   return true;
 }
 
-export function unlockedRelics(save) {
-  return META_UPGRADES.filter((u) => u.relic && upgradeLevel(save, u.id) > 0).map((u) => u.relic);
+export function unlockedUpgrades(save) {
+  return META_UPGRADES.filter((u) => u.unlocks && upgradeLevel(save, u.id) > 0).map((u) => u.unlocks);
+}
+
+export function keepsakeLevel(save, id) {
+  return (save.keepsakes && save.keepsakes[id]) || 0;
+}
+
+export function nextKeepsakeCost(save, k) {
+  const lv = keepsakeLevel(save, k.id);
+  return lv < k.costs.length ? k.costs[lv] : null;
+}
+
+export function buyKeepsake(save, id) {
+  const k = KEEPSAKES.find((x) => x.id === id);
+  const cost = k && nextKeepsakeCost(save, k);
+  if (cost == null || save.stardust < cost) return false;
+  save.stardust -= cost;
+  save.keepsakes = { ...save.keepsakes, [id]: keepsakeLevel(save, id) + 1 };
+  persist(save);
+  return true;
+}
+
+export function selectKeepsake(save, id) {
+  save.keepsake = id && keepsakeLevel(save, id) > 0 ? id : null;
+  persist(save);
 }
 
 export function recordRun(save, summary, shopVisits) {
@@ -70,8 +96,8 @@ export function recordRun(save, summary, shopVisits) {
 
 // 汇总商店日志：玩家把金币花在了哪里、每次逛店犹豫了多久
 export function shopStats(log) {
-  const spend = { heal: 0, relic: 0, stardust: 0 };
-  const visitsWith = { heal: 0, relic: 0, stardust: 0, nothing: 0 };
+  const spend = { heal: 0, upgrade: 0, stardust: 0 };
+  const visitsWith = { heal: 0, upgrade: 0, stardust: 0, nothing: 0 };
   let totalTime = 0;
   let saved = 0;
   for (const v of log) {
@@ -79,13 +105,14 @@ export function shopStats(log) {
     saved += v.goldOut;
     const kinds = new Set();
     for (const p of v.purchases) {
-      spend[p.kind] += p.price;
-      kinds.add(p.kind);
+      const kind = p.kind === 'relic' ? 'upgrade' : p.kind; // 兼容旧存档
+      spend[kind] += p.price;
+      kinds.add(kind);
     }
     if (!kinds.size) visitsWith.nothing++;
     for (const k of kinds) visitsWith[k]++;
   }
-  const totalSpend = spend.heal + spend.relic + spend.stardust;
+  const totalSpend = spend.heal + spend.upgrade + spend.stardust;
   return {
     visits: log.length,
     spend,

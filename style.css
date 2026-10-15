@@ -67,6 +67,20 @@ button { font: inherit; }
 #focus-wrap.active #focus-fill { background: #fff; }
 @keyframes pulse { from { opacity: 0.6; } to { opacity: 1; } }
 
+/* 强化类别：基础 白 / 流派 蓝 / 核心 金 / 通用 灰 / 经济 绿 */
+.item.cat-base { border-color: #6b7394; }
+.item.cat-school { border-color: #3a5a9a; }
+.item.cat-core { border-color: #ffd166; background: linear-gradient(180deg, #2e2814, #182039); box-shadow: 0 0 18px rgba(255, 209, 102, 0.18); }
+.item.cat-core .name { color: var(--gold); }
+.item.cat-general { border-color: #4a4f63; }
+.item.cat-econ { border-color: #2f6a4a; }
+.relic-chip { position: relative; }
+.relic-chip.cat-core { border-color: var(--gold); box-shadow: 0 0 6px rgba(255, 209, 102, 0.5); }
+.relic-chip sub { position: absolute; right: 2px; bottom: -2px; font-size: 10px; color: var(--dim); }
+#heat { margin-top: 6px; height: 6px; background: #1c2440; border-radius: 3px; overflow: hidden; }
+#heat-fill { height: 100%; width: 0; background: linear-gradient(90deg, #ffb703, #fb5607); }
+#heat.full #heat-fill { background: #ff3d00; box-shadow: 0 0 8px #ff3d00; }
+#crosshair.flick .ch { background: var(--gold); box-shadow: 0 0 6px var(--gold); }
 #threat { position: absolute; inset: 0; width: 100%; height: 100%; }
 #reload-ring { position: absolute; left: -22px; top: -22px; width: 44px; height: 44px; border-radius: 50%; opacity: 0;
   background: conic-gradient(#fff calc(var(--p, 0) * 1turn), rgba(255,255,255,0.12) 0);

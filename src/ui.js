@@ -1,13 +1,13 @@
 // DOM 界面：HUD 与各个全屏界面。按钮通过 data-action 统一派发给 game。
-import { RELICS } from './relics.js';
-import { META_UPGRADES, BOTS, WAVES, FOCUS, SHOP, SETTLEMENT, WEAPON } from './config.js';
-import { upgradeLevel, nextUpgradeCost, shopStats } from './meta.js';
+import { UPGRADES, SCHOOLS, CAT_LABEL, BASE_MAX_LEVEL } from './upgrades.js';
+import { META_UPGRADES, KEEPSAKES, BOTS, WAVES, FOCUS, SHOP, SETTLEMENT, WEAPON } from './config.js';
+import { upgradeLevel, nextUpgradeCost, keepsakeLevel, nextKeepsakeCost, shopStats } from './meta.js';
 import * as R from './run.js';
 
 const $ = (id) => document.getElementById(id);
 
 const KIND_LABEL = { stat: '宽容度', talent: '开局选择', unlock: '解锁' };
-const SPEND_LABEL = { heal: '回血', relic: '遗物', stardust: '星尘' };
+const SPEND_LABEL = { heal: '回血', upgrade: '强化', stardust: '星尘' };
 
 export class UI {
   constructor(onAction) {
@@ -118,19 +118,31 @@ export class UI {
           <ul class="small" style="padding-left:18px;margin:0">
             <li>连续命中提升<b>倍率</b>，倍率越高击杀掉落金币越多。<b style="color:var(--danger)">打空一枪倍率清零</b>。</li>
             <li>爆头伤害 ×2，并额外 +1 连杀。打空的子弹同样消耗弹匣，换弹期间不能开火。</li>
-            <li>共 ${WAVES.length} 波。每波后免费三选一遗物，再进商店：<span class="goldtxt">回血 / 遗物 / 星尘</span>。</li>
+            <li>共 ${WAVES.length} 波。每波后免费三选一<b>强化</b>，再进商店：<span class="goldtxt">回血 / 强化 / 星尘</span>。</li>
+            <li>强化分三个流派：<b style="color:${SCHOOLS.head.color}">爆头</b>、<b style="color:${SCHOOLS.spray.color}">扫射</b>、<b style="color:${SCHOOLS.time.color}">子弹时间</b>，金色的<b class="goldtxt">核心强化</b>会改变规则。</li>
             <li>星尘是局外货币：买了这局变弱，下一局受益。越深的商店兑换越多。</li>
           </ul>
         </div>
         <div>
           <h3>敌人</h3>
           <ul class="small" style="padding-left:18px;margin:0">${bots}</ul>
+          <h3>携带遗物</h3>
+          ${this.keepsakePicker(save)}
           <h3>本局加成</h3>
           <div class="small dim">${this.metaSummary(save) || '暂无 —— 去星尘工坊看看'}</div>
           <div style="margin-top:22px"><button class="btn primary" data-action="start">开始一局</button></div>
           <p class="small dim">点击开始后会锁定鼠标。灵敏度可在「设置」里调整。</p>
         </div>
       </div>`;
+  }
+
+  keepsakePicker(save) {
+    const owned = KEEPSAKES.filter((k) => keepsakeLevel(save, k.id) > 0);
+    const btn = (id, label, title) => `<button class="tab ${save.keepsake === id ? 'on' : ''}" data-action="keepsake" data-id="${id || ''}" title="${title}">${label}</button>`;
+    const cur = KEEPSAKES.find((k) => k.id === save.keepsake);
+    const lvNow = cur ? keepsakeLevel(save, cur.id) : 0;
+    return `<div class="row" style="gap:6px">${btn(null, '不携带', '')}${owned.map((k) => btn(k.id, `${k.icon} ${k.name} Lv${keepsakeLevel(save, k.id)}`, k.levels.join('；'))).join('')}</div>
+      <div class="small dim" style="margin-top:6px">${cur ? cur.levels.slice(0, lvNow).map((t, i) => `Lv${i + 1}：${t}`).join('<br>') : '每局开局选 1 个遗物带进去。'}</div>`;
   }
 
   metaSummary(save) {
@@ -140,19 +152,28 @@ export class UI {
   }
 
   titleWorkshop(save) {
-    const rows = META_UPGRADES.map((u) => {
+    const buyBtn = (action, id, cost) => (cost == null
+      ? '<button class="btn" disabled>已满级</button>'
+      : `<button class="btn" data-action="${action}" data-id="${id}" ${save.stardust < cost ? 'disabled' : ''}>✦ ${cost}</button>`);
+    const keepsakes = KEEPSAKES.map((k) => {
+      const lv = keepsakeLevel(save, k.id);
+      const cost = nextKeepsakeCost(save, k);
+      const school = k.school ? `<span class="kind" style="color:${SCHOOLS[k.school].color}">${SCHOOLS[k.school].name}</span>` : '';
+      const lines = k.levels.map((t, i) => `<div class="small ${i < lv ? '' : 'dim'}">Lv${i + 1}：${t}</div>`).join('');
+      return `<div class="upgrade"><div class="grow"><b>${k.icon} ${k.name}</b>${school}${lines}</div>
+        <div class="lv">${lv}/${k.costs.length}</div>${buyBtn('buyKeepsake', k.id, cost)}</div>`;
+    }).join('');
+    const row = (u) => {
       const lv = upgradeLevel(save, u.id);
-      const cost = nextUpgradeCost(save, u);
-      const btn = cost == null
-        ? '<button class="btn" disabled>已满级</button>'
-        : `<button class="btn" data-action="upgrade" data-id="${u.id}" ${save.stardust < cost ? 'disabled' : ''}>✦ ${cost}</button>`;
       return `<div class="upgrade">
         <div class="grow"><b>${u.name}</b><span class="kind ${u.kind}">${KIND_LABEL[u.kind]}</span>
           <div class="small dim">${u.desc}</div></div>
-        <div class="lv">${lv}/${u.costs.length}</div>${btn}</div>`;
-    }).join('');
+        <div class="lv">${lv}/${u.costs.length}</div>${buyBtn('upgrade', u.id, nextUpgradeCost(save, u))}</div>`;
+    };
     return `<p class="small dim">局外成长以解锁为主；数值成长只给宽容度（血量、护盾），且有上限。</p>
-      <div style="display:grid;gap:8px">${rows}</div>`;
+      <h3>遗物（开局携带）</h3><div style="display:grid;gap:8px">${keepsakes}</div>
+      <h3>解锁</h3><div style="display:grid;gap:8px">${META_UPGRADES.filter((u) => u.kind === 'unlock').map(row).join('')}</div>
+      <h3>宽容度与开局选择</h3><div style="display:grid;gap:8px">${META_UPGRADES.filter((u) => u.kind !== 'unlock').map(row).join('')}</div>`;
   }
 
   titleProfile(save) {
@@ -183,12 +204,12 @@ export class UI {
 
   titleTuning(save) {
     const s = shopStats(save.shopLog);
-    if (!s.visits) return '<p class="dim">还没有商店数据。这里会汇总你每次进商店时把金币花在了哪里，用来判断回血 / 遗物 / 星尘的价格是否平衡。</p>';
+    if (!s.visits) return '<p class="dim">还没有商店数据。这里会汇总你每次进商店时把金币花在了哪里，用来判断回血 / 强化 / 星尘的价格是否平衡。</p>';
     return `
-      <p class="small dim">原型的核心验证问题：<b>玩家在商店里是否真的会在回血、遗物、星尘之间犹豫？</b>如果总是选同一个，就去 <code>src/config.js</code> 的 SHOP 段调价。</p>
+      <p class="small dim">原型的核心验证问题：<b>玩家在商店里是否真的会在回血、强化、星尘之间犹豫？</b>如果总是选同一个，就去 <code>src/config.js</code> 的 SHOP 段调价。</p>
       ${this.spendBlock(s)}
       <h3>当前价格</h3>
-      <div class="small">回血 ${SHOP.healBasePrice}（每买一次 +${SHOP.healPriceStep}）· 遗物 普通 ${SHOP.relicPrice.common} / 稀有 ${SHOP.relicPrice.rare} ·
+      <div class="small">回血 ${SHOP.healBasePrice}（每买一次 +${SHOP.healPriceStep}）· 强化 基础 ${SHOP.upgradePrice.base}（每级 +${SHOP.upgradePrice.baseStep}）/ 流派 ${SHOP.upgradePrice.school} / 通用 ${SHOP.upgradePrice.general} / 经济 ${SHOP.upgradePrice.econ} / 核心 ${SHOP.upgradePrice.core} ·
         星尘 ${SHOP.stardustBasePrice}（每买一次 +${SHOP.stardustPriceStep}，兑换量 ${SHOP.stardustYieldBase}+${SHOP.stardustYieldPerDepth}×深度）。
         以上为第 0 层基础价，实际价格 ×(1 + ${SHOP.priceGrowth}×深度)。</div>
       <div style="margin-top:14px"><button class="btn danger" data-action="clearLog">清空商店日志</button></div>`;
@@ -198,8 +219,8 @@ export class UI {
     const pct = (k) => (s.totalSpend ? (s.spend[k] / s.totalSpend) * 100 : 0);
     const visitPct = (k) => ((s.visitsWith[k] / s.visits) * 100).toFixed(0);
     let verdict = '';
-    const dominant = ['heal', 'relic', 'stardust'].find((k) => pct(k) > 70);
-    const never = ['heal', 'relic', 'stardust'].filter((k) => s.visitsWith[k] === 0);
+    const dominant = ['heal', 'upgrade', 'stardust'].find((k) => pct(k) > 70);
+    const never = ['heal', 'upgrade', 'stardust'].filter((k) => s.visitsWith[k] === 0);
     if (s.visits < 5) verdict = '<div class="ok-box">样本还少（< 5 次逛店），多打几局再下结论。</div>';
     else if (dominant) verdict = `<div class="warn-box">${Math.round(pct(dominant))}% 的金币流向了「${SPEND_LABEL[dominant]}」。考虑提高它的价格，或降低其他选项的价格。</div>`;
     else if (never.length) verdict = `<div class="warn-box">从没买过：${never.map((k) => SPEND_LABEL[k]).join('、')}。它可能太贵或收益不明显。</div>`;
@@ -212,9 +233,9 @@ export class UI {
         ${this.statCard('空手离开', `${visitPct('nothing')}%`)}
       </div>
       <div class="small">金币去向（按金额）</div>
-      <div class="bar3"><div class="c-heal" style="width:${pct('heal')}%"></div><div class="c-relic" style="width:${pct('relic')}%"></div><div class="c-star" style="width:${pct('stardust')}%"></div></div>
-      <div class="legend small dim"><span class="c-heal"></span>回血 ${pct('heal').toFixed(0)}%<span class="c-relic"></span>遗物 ${pct('relic').toFixed(0)}%<span class="c-star"></span>星尘 ${pct('stardust').toFixed(0)}%</div>
-      <div class="small dim" style="margin-top:4px">买过的逛店占比：回血 ${visitPct('heal')}% · 遗物 ${visitPct('relic')}% · 星尘 ${visitPct('stardust')}%</div>
+      <div class="bar3"><div class="c-heal" style="width:${pct('heal')}%"></div><div class="c-relic" style="width:${pct('upgrade')}%"></div><div class="c-star" style="width:${pct('stardust')}%"></div></div>
+      <div class="legend small dim"><span class="c-heal"></span>回血 ${pct('heal').toFixed(0)}%<span class="c-relic"></span>强化 ${pct('upgrade').toFixed(0)}%<span class="c-star"></span>星尘 ${pct('stardust').toFixed(0)}%</div>
+      <div class="small dim" style="margin-top:4px">买过的逛店占比：回血 ${visitPct('heal')}% · 强化 ${visitPct('upgrade')}% · 星尘 ${visitPct('stardust')}%</div>
       ${verdict}`;
   }
 
@@ -244,25 +265,35 @@ export class UI {
 
   // ---------------- 局内界面 ----------------
 
-  relicCard(id, { action, slot, price, gold, sold, run } = {}) {
-    const r = RELICS[id];
-    const cls = ['item', r.rarity === 'rare' ? 'rare' : '', r.curse ? 'curse' : '', sold ? 'sold' : ''].join(' ');
-    const tag = r.supply ? '补给 · 立即生效' : `${r.rarity === 'rare' ? '稀有' : '普通'}${r.econ ? ' · 经济' : ''}${r.curse ? ' · 诅咒' : ''}`;
-    const desc = id === 'sup_gold' && run ? `立即获得 ${R.supplyGold(run)} 金币。` : r.desc;
+  upgradeCard(id, run, { action, slot, price, gold, sold } = {}) {
+    const u = UPGRADES[id];
+    const level = R.lv(run, id);
+    const school = u.school ? SCHOOLS[u.school] : null;
+    const cls = ['item', `cat-${u.cat}`, u.curse ? 'curse' : '', sold ? 'sold' : ''].join(' ');
+    let tag = CAT_LABEL[u.cat];
+    if (school) tag = `<span style="color:${school.color}">${school.name} · ${u.set}</span> · ${tag}`;
+    if (u.cat === 'base') tag += ` · Lv${level} → Lv${level + 1}（最高 ${BASE_MAX_LEVEL}）`;
+    if (u.curse) tag += ' · 诅咒';
     const priceHtml = price != null ? `<div class="price ${gold < price ? 'no' : ''}">${sold ? '已售出' : `● ${price}`}</div>` : '';
     const disabled = sold || (price != null && gold < price) ? 'disabled' : '';
-    return `<button class="${cls}" data-action="${action}" data-id="${id}" data-slot="${slot ?? ''}" ${disabled}>
-      <div class="icon">${r.icon}</div><div class="name">${r.name}</div><div class="tag">${tag}</div>
-      <div class="desc">${desc}</div>${priceHtml}</button>`;
+    return `<button class="${cls}" data-action="${action}" data-id="${id}" data-slot="${slot ?? ''}" data-school="${u.school || ''}" data-cat="${u.cat}" ${disabled}>
+      <div class="icon">${u.icon}</div><div class="name">${u.name}</div><div class="tag">${tag}</div>
+      <div class="desc">${u.desc}</div>${priceHtml}</button>`;
+  }
+
+  upgradeList(run) {
+    const ids = Object.keys(run.ups);
+    if (!ids.length) return '无';
+    return ids.map((id) => `${UPGRADES[id].name}${UPGRADES[id].cat === 'base' ? ` Lv${run.ups[id]}` : ''}`).join('、');
   }
 
   reward(run, choices, title) {
     this.show(`
       <div class="card">
         <h2>${title}</h2>
-        <p class="dim small">免费三选一。遗物只会奖励精准，不会替你瞄准。</p>
-        <div class="choices">${choices.map((id) => this.relicCard(id, { action: 'pickRelic', run })).join('')}</div>
-        <div class="row"><div class="grow small dim">已有遗物：${run.relics.map((id) => RELICS[id].name).join('、') || '无'}</div>
+        <p class="dim small">免费三选一。强化只会奖励精准，不会替你瞄准。</p>
+        <div class="choices">${choices.map((id) => this.upgradeCard(id, run, { action: 'pick' })).join('')}</div>
+        <div class="row"><div class="grow small dim">已有强化：${this.upgradeList(run)}</div>
         <button class="btn ghost" data-action="skipReward">跳过</button></div>
       </div>`);
   }
@@ -285,10 +316,10 @@ export class UI {
         <div class="choices">
           <button class="item heal" data-action="buyHeal" ${run.gold < heal || full ? 'disabled' : ''}>
             <div class="icon">✚</div><div class="name">回血</div><div class="tag">本局已购 ${run.healBuys} 次</div>
-            <div class="desc">恢复 ${R.healAmount(run)} 点生命。${run.relics.includes('clinic') ? '价格不再上涨。' : '每次购买后价格上涨。'}</div>
+            <div class="desc">恢复 ${R.healAmount(run)} 点生命。${R.has(run, 'clinic') ? '价格不再上涨。' : '每次购买后价格上涨。'}</div>
             <div class="price ${run.gold < heal ? 'no' : ''}">${full ? '满血' : `● ${heal}`}</div>
           </button>
-          ${shop.relics.map((it, i) => this.relicCard(it.id, { action: 'buyRelic', slot: i, price: R.relicPrice(run, it.id), gold: run.gold, sold: it.sold })).join('')}
+          ${shop.items.map((it, i) => this.upgradeCard(it.id, run, { action: 'buyItem', slot: i, price: R.upgradePrice(run, it.id), gold: run.gold, sold: it.sold })).join('')}
           ${sd ? `<button class="item star" data-action="buyStardust" ${run.gold < sdPrice ? 'disabled' : ''}>
             <div class="icon">✦</div><div class="name">兑换星尘</div><div class="tag">局外货币 · 本局已兑 ${run.stardustBuys} 次</div>
             <div class="desc">获得 <span class="stardust">${sdYield} 星尘</span>，阵亡也保留。这局会变弱，下一局受益。
@@ -296,6 +327,7 @@ export class UI {
             <div class="price ${run.gold < sdPrice ? 'no' : ''}">● ${sdPrice}</div>
           </button>` : `<div class="item" style="opacity:.5"><div class="icon">✦</div><div class="name">本店不卖星尘</div></div>`}
         </div>
+        <p class="small dim">已有强化：${this.upgradeList(run)}</p>
         <div class="row"><div class="grow small dim">本局已兑换星尘：<span class="stardust">${run.stardustFromShop}</span></div>
           <button class="btn primary" data-action="leaveShop">进入${nextWave.name}</button></div>
       </div>`);
@@ -311,7 +343,7 @@ export class UI {
 
   results(run, summary, settlement) {
     const visits = run.shopVisits.map((v) => {
-      const buys = v.purchases.map((p) => `${p.kind === 'relic' ? RELICS[p.id].name : SPEND_LABEL[p.kind]}(${p.price})`).join('、') || '<span class="dim">什么都没买</span>';
+      const buys = v.purchases.map((p) => `${p.kind === 'upgrade' ? UPGRADES[p.id].name : SPEND_LABEL[p.kind]}(${p.price})`).join('、') || '<span class="dim">什么都没买</span>';
       return `<tr><td>第 ${v.shop} 家</td><td>${v.hpIn}/${v.maxHp}</td><td>${v.goldIn}</td><td>${buys}</td><td>${v.goldOut}</td><td>${(v.timeMs / 1000).toFixed(1)}s</td></tr>`;
     }).join('');
     this.show(`
@@ -333,11 +365,12 @@ export class UI {
           <tr><td>爆头 ${summary.headshots} × ${SETTLEMENT.perHeadshot}</td><td class="stardust">+${settlement.headshots}</td></tr>
           <tr><td>到达深度 ${summary.waves} 波 × ${SETTLEMENT.perWave}</td><td class="stardust">+${settlement.depth}</td></tr>
           ${summary.victory ? `<tr><td>通关奖励</td><td class="stardust">+${settlement.victory}</td></tr>` : ''}
+          ${settlement.blank ? `<tr><td>空白徽章 +25%</td><td class="stardust">+${settlement.blank}</td></tr>` : ''}
           <tr><td>商店兑换</td><td class="stardust">+${settlement.shop}</td></tr>
         </table>
         <h3>本局商店决策</h3>
         ${visits ? `<table><tr><th>商店</th><th>进店生命</th><th>进店金币</th><th>购买</th><th>剩余</th><th>停留</th></tr>${visits}</table>` : '<p class="dim small">本局没有进过商店。</p>'}
-        <p class="small dim">遗物：${run.relics.map((id) => RELICS[id].name).join('、') || '无'}</p>
+        <p class="small dim">强化：${this.upgradeList(run)}${run.keepsake ? ` · 遗物：${KEEPSAKES.find((k) => k.id === run.keepsake).name} Lv${run.keepsakeLv}` : ''}</p>
         <div class="row" style="margin-top:16px">
           <button class="btn primary" data-action="start">再来一局</button>
           <button class="btn" data-action="toTitle">返回标题</button>
@@ -347,7 +380,7 @@ export class UI {
 
   // ---------------- HUD ----------------
 
-  updateHud(run, waveLabel, enemiesLeft) {
+  updateHud(run, waveLabel, enemiesLeft, extra = {}) {
     $('hp-fill').style.width = `${(run.hp / run.maxHp) * 100}%`;
     $('hp-text').textContent = `${Math.ceil(run.hp)} / ${run.maxHp}`;
     $('shield').innerHTML = '<span></span>'.repeat(run.shield);
@@ -367,10 +400,12 @@ export class UI {
     const fw = $('focus-wrap');
     const active = run.focusTime > 0;
     const ready = R.canActivateFocus(run);
-    $('focus-fill').style.width = active ? `${(run.focusTime / R.focusDuration(run)) * 100}%` : `${(run.focus / FOCUS.max) * 100}%`;
+    $('focus-fill').style.width = active ? `${(run.focusTime / Math.max(0.01, run.focusTotal)) * 100}%` : `${(run.focus / R.focusMax(run)) * 100}%`;
     fw.classList.toggle('ready', ready);
     fw.classList.toggle('active', active);
-    $('focus-hint').textContent = active ? `子弹时间 ${run.focusTime.toFixed(1)}s` : ready ? '子弹时间就绪：右键 / E / 空格' : '专注充能中（命中充能）';
+    $('focus-hint').textContent = active ? `${R.has(run, 'stasis') ? '时停' : '子弹时间'} ${run.focusTime.toFixed(1)}s`
+      : run.debtTime > 0 ? `时间债：敌人加速 ${run.debtTime.toFixed(1)}s`
+        : ready ? '子弹时间就绪：右键 / E / 空格' : '专注充能中（命中充能）';
     $('focus-overlay').classList.toggle('on', active);
     $('view').classList.toggle('slowmo', active);
     const mag = R.magSize(run);
@@ -383,14 +418,23 @@ export class UI {
     hint.classList.toggle('reloading', rl);
     const ring = $('reload-ring');
     ring.classList.toggle('on', rl);
-    if (rl) ring.style.setProperty('--p', 1 - run.reloadLeft / WEAPON.reloadTime);
+    if (rl) ring.style.setProperty('--p', 1 - run.reloadLeft / Math.max(0.01, run.reloadTotal));
+    const heat = $('heat');
+    heat.hidden = !R.has(run, 'overheat');
+    if (!heat.hidden) {
+      $('heat-fill').style.width = `${(run.heat / 20) * 100}%`;
+      heat.classList.toggle('full', run.heat >= 20);
+    }
+    $('crosshair').classList.toggle('flick', !!extra.flick);
     $('vignette').classList.toggle('low', run.hp / run.maxHp < 0.3);
   }
 
-  renderRelicBar(run) {
-    $('relic-bar').innerHTML = run.relics.map((id) => {
-      const r = RELICS[id];
-      return `<div class="relic-chip ${r.rarity}" title="${r.name}：${r.desc}">${r.icon}</div>`;
+  renderUpgradeBar(run) {
+    $('relic-bar').innerHTML = Object.keys(run.ups).map((id) => {
+      const u = UPGRADES[id];
+      const color = u.school ? SCHOOLS[u.school].color : '';
+      const lvTag = u.cat === 'base' ? `<sub>${run.ups[id]}</sub>` : '';
+      return `<div class="relic-chip cat-${u.cat}" style="${color ? `border-color:${color}` : ''}" title="${u.name}：${u.desc}">${u.icon}${lvTag}</div>`;
     }).join('');
   }
 

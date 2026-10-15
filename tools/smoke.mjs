@@ -25,7 +25,7 @@ for (let i = 0; i < 3000; i++) {
     combatShot = true;
   }
   if (state === 'reward') {
-    await page.click('[data-action=pickRelic]');
+    await page.click('[data-action=pick]');
   } else if (state === 'shop') {
     if (!shopShot) { await page.screenshot({ path: `${shots}/03-shop.png` }); shopShot = true; }
     const buy = await page.$('[data-action=buyStardust]:not([disabled])');
@@ -37,11 +37,11 @@ for (let i = 0; i < 3000; i++) {
   await page.waitForTimeout(500);
 }
 const summary = await page.evaluate(() => {
-  const { relics, ...s } = game.lastSummary || {};
+  const { upgrades, ...s } = game.lastSummary || {};
   return {
     state: game.state,
     summary: s,
-    relics: relics?.length,
+    upgrades: upgrades?.join(','),
     shops: game.save.shopLog.map((v) => `#${v.shop} 金币${v.goldIn} 生命${v.hpIn}/${v.maxHp}`),
   };
 });

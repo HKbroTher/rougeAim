@@ -1,11 +1,13 @@
-// 主控制器：状态机（标题 → 战斗 → 遗物 → 商店 → … → 结算）、输入、射击与波次。
+// 主控制器：状态机（标题 → 战斗 → 强化三选一 → 商店 → … → 结算）、输入、射击、波次与强化效果。
 import * as THREE from '../vendor/three.module.min.js';
-import { PLAYER, WEAPON, WAVES, ARENA, SETTLEMENT, FOCUS, THREAT, MOVEMENT, rollMove } from './config.js';
+import { PLAYER, WEAPON, WAVES, ARENA, SETTLEMENT, FOCUS, THREAT, MOVEMENT, KEEPSAKES, rollMove } from './config.js';
+import { SCHOOLS } from './upgrades.js';
 import { Bot } from './bots.js';
 import { UI } from './ui.js';
 import { createWorld } from './world.js';
 import { initAudio, setVolume, sfx } from './audio.js';
-import { loadSave, persist, resetSave, buyUpgrade, recordRun } from './meta.js';
+import { loadSave, persist, resetSave, buyUpgrade, buyKeepsake, selectKeepsake, recordRun } from './meta.js';
+import { META_UPGRADES } from './config.js';
 import * as R from './run.js';
 import { SimAimer, SKILLS } from './simaim.js';
 
@@ -36,11 +38,13 @@ export class Game {
     this.timeScale = 1;
     this.worldScale = 1; // 子弹时间：只影响敌人、出怪与特效，不影响玩家
     this.autoAim = false; // 仅 ?debug 下用于自动化冒烟测试，正式玩法不存在
+    this.yawHist = [];    // 甩枪大师：最近 0.4 秒的视角
+    this.flickReady = false;
     this.bindInput(canvas);
     this.toTitle();
     this.last = performance.now();
     requestAnimationFrame((t) => this.frame(t));
-    if (DEBUG) Object.assign(window, { game: this, SimAimer, SKILLS });
+    if (DEBUG) Object.assign(window, { game: this, SimAimer, SKILLS, META_UPGRADES });
   }
 
   // ---------------- 输入 ----------------
@@ -69,7 +73,7 @@ export class Game {
         e.preventDefault();
         this.tryFocus();
       }
-      if (e.code === 'KeyR') this.tryReload();
+      if (e.code === 'KeyR') this.tryReload(true);
     });
     document.addEventListener('pointerlockchange', () => {
       if (!this.locked() && this.state === 'combat' && !DEBUG) this.pause();
@@ -114,6 +118,14 @@ export class Game {
         if (buyUpgrade(this.save, data.id)) sfx.buy(); else sfx.deny();
         this.ui.title(this.save, this.titleTab);
         break;
+      case 'buyKeepsake':
+        if (buyKeepsake(this.save, data.id)) sfx.buy(); else sfx.deny();
+        this.ui.title(this.save, this.titleTab);
+        break;
+      case 'keepsake':
+        selectKeepsake(this.save, data.id || null);
+        this.ui.title(this.save, this.titleTab);
+        break;
       case 'setting': {
         const v = Number(data.value);
         this.save.settings[data.key] = v;
@@ -130,8 +142,8 @@ export class Game {
         persist(this.save);
         this.ui.title(this.save, this.titleTab);
         break;
-      case 'pickRelic':
-        R.addRelic(this.run, data.id);
+      case 'pick':
+        R.addUpgrade(this.run, data.id);
         sfx.buy();
         this.afterReward();
         break;
@@ -141,8 +153,8 @@ export class Game {
       case 'buyHeal':
         this.shopResult(R.buyHeal(this.run, this.shop));
         break;
-      case 'buyRelic':
-        this.shopResult(R.buyRelic(this.run, this.shop, Number(data.slot)));
+      case 'buyItem':
+        this.shopResult(R.buyItem(this.run, this.shop, Number(data.slot)));
         break;
       case 'buyStardust':
         this.shopResult(R.buyStardust(this.run, this.shop));
@@ -187,14 +199,27 @@ export class Game {
     this.run = R.createRun(this.save);
     this.yaw = 0;
     this.pitch = 0;
+    this.reactions = [];
     this.clearBots();
-    if (this.run.extraChoice) {
-      this.rewardContext = 'start';
-      this.state = 'reward';
-      this.ui.reward(this.run, R.rollRewardChoices(this.run), '开局补给 · 选择一个遗物');
-    } else {
-      this.startWave();
+    // 开局三选一：星尘工坊「开局补给」、遗物 3 级的流派三选一
+    this.openingPicks = [];
+    const run = this.run;
+    const ks = KEEPSAKES.find((k) => k.id === run.keepsake);
+    if (ks && ks.school && run.keepsakeLv >= 3) {
+      this.openingPicks.push({ title: `${ks.name} · 选择一个${SCHOOLS[ks.school].name}强化`, opts: { school: ks.school } });
     }
+    if (run.extraChoice) this.openingPicks.push({ title: '开局补给 · 选择一个强化', opts: {} });
+    this.nextOpeningPick();
+  }
+
+  nextOpeningPick() {
+    const next = this.openingPicks.shift();
+    if (!next) { this.startWave(); return; }
+    const choices = R.rollRewardChoices(this.run, 3, next.opts);
+    if (!choices.length) { this.nextOpeningPick(); return; }
+    this.rewardContext = 'start';
+    this.state = 'reward';
+    this.ui.reward(this.run, choices, next.title);
   }
 
   startWave() {
@@ -221,9 +246,11 @@ export class Game {
     this.waveDef = def;
     this.state = 'combat';
     this.firing = false;
+    this.worldScale = 1;
+    this.yawHist = [];
     this.ui.hideScreen();
     this.ui.showHud(true);
-    this.ui.renderRelicBar(run);
+    this.ui.renderUpgradeBar(run);
     this.ui.banner(def.name);
     this.lock();
   }
@@ -231,9 +258,8 @@ export class Game {
   endWave() {
     const run = this.run;
     R.logWaveEnd(run, true);
-    run.waveIndex++;
+    R.finishWave(run);
     this.firing = false;
-    run.focusTime = 0;
     this.ui.endCombatFx();
     if (run.waveIndex >= WAVES.length) {
       this.finish(true);
@@ -244,15 +270,16 @@ export class Game {
     this.state = 'reward';
     const choices = R.rollRewardChoices(run);
     if (!choices.length) { this.afterReward(); return; }
-    this.ui.reward(run, choices, `${WAVES[run.waveIndex - 1].name} 清除 · 选择一个遗物`);
+    this.ui.reward(run, choices, `${WAVES[run.waveIndex - 1].name} 清除 · 选择一个强化`);
   }
 
   afterReward() {
-    this.ui.renderRelicBar(this.run);
+    this.ui.renderUpgradeBar(this.run);
     if (this.rewardContext === 'start') {
-      this.startWave();
+      this.nextOpeningPick();
       return;
     }
+    this.run.rewardsTaken++;
     this.state = 'shop';
     this.shop = R.openShop(this.run);
     this.ui.shop(this.run, this.shop);
@@ -281,6 +308,9 @@ export class Game {
       victory: victory ? SETTLEMENT.victoryBonus : 0,
       shop: run.stardustFromShop,
     };
+    if (run.keepsake === 'blank') {
+      settlement.blank = Math.round(0.25 * (settlement.combo + settlement.headshots + settlement.depth + settlement.victory));
+    }
     const stardust = Object.values(settlement).reduce((a, b) => a + b, 0);
     const reactions = this.reactions || [];
     const summary = {
@@ -297,7 +327,8 @@ export class Game {
       moverAcc: s.moverHits + s.moverMisses >= 10 ? s.moverHits / (s.moverHits + s.moverMisses) : null,
       goldEarned: s.goldEarned,
       stardust,
-      relics: [...run.relics],
+      upgrades: Object.keys(run.ups),
+      keepsake: run.keepsake,
     };
     this.reactions = [];
     this.save.stardust += stardust;
@@ -321,8 +352,11 @@ export class Game {
     }
   }
 
-  tryReload() {
-    if (R.startReload(this.run)) sfx.reloadStart();
+  // manual：玩家主动按 R（战术换弹只对主动换弹生效）
+  tryReload(manual = false) {
+    const res = R.startReload(this.run, manual);
+    if (res === 'instant') sfx.reloadDone();
+    else if (res === 'started') sfx.reloadStart();
   }
 
   frame(now) {
@@ -340,9 +374,17 @@ export class Game {
   // wdt 为世界时间：敌人移动、出怪节奏、特效用它，子弹时间里会变慢。
   update(dt) {
     const run = this.run;
-    if (run.focusTime > 0) run.focusTime = Math.max(0, run.focusTime - dt);
-    const target = run.focusTime > 0 ? FOCUS.timeScale : 1;
-    const rate = dt / FOCUS.ramp;
+    // 子弹时间 / 时间债计时（真实时间）
+    if (run.focusTime > 0) {
+      run.focusTime = Math.max(0, run.focusTime - dt);
+      if (run.focusTime === 0) this.onBulletTimeEnd();
+    } else if (run.debtTime > 0) {
+      run.debtTime = Math.max(0, run.debtTime - dt);
+    }
+    const target = run.focusTime > 0 ? R.bulletTimeScale(run) : run.debtTime > 0 ? 1.5 : 1;
+    // 惯性：退出子弹时间时用 2 秒慢慢恢复
+    const recovering = target > this.worldScale && run.focusTime <= 0 && R.has(run, 'inertia');
+    const rate = recovering ? dt * (1 - FOCUS.timeScale) / 2 : dt / FOCUS.ramp;
     this.worldScale += Math.max(-rate, Math.min(rate, target - this.worldScale));
     const wdt = dt * this.worldScale;
     this.waveTime += wdt;
@@ -361,6 +403,11 @@ export class Game {
     if (this.sim) this.sim.update(dt);
     this.camera.rotation.set(this.pitch, this.yaw, 0);
 
+    // 甩枪大师：0.4 秒内转身 ≥ 60°
+    this.yawHist.push({ t: this.time, yaw: this.yaw });
+    while (this.yawHist.length && this.yawHist[0].t < this.time - 0.4) this.yawHist.shift();
+    this.flickReady = R.has(run, 'flickmaster') && this.yawHist.some((h) => Math.abs(h.yaw - this.yaw) >= Math.PI / 3);
+
     // 视野检测：用于「甩枪反应」统计
     this.camera.updateMatrixWorld();
     this.projM.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
@@ -368,22 +415,31 @@ export class Game {
 
     for (const bot of this.bots) {
       if (bot.dead) continue;
-      if (bot.seenAt == null && this.frustum.containsPoint(bot.headWorld)) bot.seenAt = this.time;
-      if (bot.update(wdt, 1)) this.botReachedPlayer(bot);
+      const visible = this.frustum.containsPoint(bot.headWorld);
+      if (visible && bot.seenAt == null) bot.seenAt = this.time;
+      if (!visible) bot.offscreenAt = this.time;
+      // 压制火力：1 秒没被命中就恢复
+      if (bot.suppress && this.time - bot.lastHitAt > 1) bot.suppress = 0;
+      if (bot.update(wdt, 1 - 0.1 * (bot.suppress || 0))) { this.botReachedPlayer(bot); continue; }
+      if (bot.burn) this.tickBurn(bot, wdt);
     }
     this.bots = this.bots.filter((b) => !b.dead);
+    if (this.state !== 'combat') return;
 
     // 换弹与射击（真实时间）
     if (R.tickReload(run, dt)) sfx.reloadDone();
     this.cooldown -= dt;
-    if (this.firing && this.cooldown <= 0 && this.state === 'combat' && !R.reloading(run)) {
+    let fired = false;
+    if (this.firing && this.cooldown <= 0 && !R.reloading(run) && run.ammo > 0) {
       this.shoot();
+      fired = true;
       this.cooldown = R.fireInterval(run, WEAPON.fireInterval);
-      if (run.ammo <= 0) this.tryReload();
+      if (run.ammo <= 0) this.tryReload(false);
     }
+    R.tickHeat(run, dt, fired);
 
     if (this.state !== 'combat') return;
-    this.ui.updateHud(run, `${this.waveDef.name} / ${WAVES.length}`, this.bots.length + this.spawnQueue.length);
+    this.ui.updateHud(run, `${this.waveDef.name} / ${WAVES.length}`, this.bots.length + this.spawnQueue.length, { flick: this.flickReady });
     this.ui.drawRadar(this.bots, this.yaw);
     this.ui.drawThreats(this.offscreenThreats(), this.time);
 
@@ -407,6 +463,7 @@ export class Game {
       const res = R.registerMiss(run);
       if (res === 'broken') { sfx.comboBreak(); this.ui.comboBreak(); }
       else if (res === 'safety') this.floatCenter('保险栓', 'info');
+      else if (res === 'halved') { sfx.miss(); this.floatCenter('连杀减半', 'info'); }
       else sfx.miss();
       return;
     }
@@ -418,34 +475,148 @@ export class Game {
       if (bot.seenAt != null) (this.reactions ||= []).push((this.time - bot.seenAt) * 1000);
     }
     if (bot.mobile) run.stats.moverHits++;
-    R.registerHit(run, head);
+
+    // 命中前的状态（用于伤害计算）
+    const wasFull = bot.hp >= bot.maxHp;
+    const flick = head && this.flickReady;
+    const calm = R.has(run, 'calm') && run.idle >= 0.5;
+    let execBonus = 0;
+    if (head && R.has(run, 'execchain')) {
+      const ec = run.execChain;
+      ec.bonus = this.time - ec.at <= 1 && ec.botId !== bot.id ? Math.min(3, ec.bonus + 1) : 0;
+      ec.botId = bot.id;
+      ec.at = this.time;
+      execBonus = ec.bonus;
+    }
+    // 连续命中同一目标
+    const tr = run.track;
+    if (tr.botId === bot.id) {
+      tr.count++;
+      const gap = this.time - tr.lastHit;
+      if (gap < 0.3) tr.time += gap;
+    } else {
+      tr.botId = bot.id;
+      tr.count = 1;
+      tr.time = 0;
+    }
+    tr.lastHit = this.time;
+    bot.hitsTaken = (bot.hitsTaken || 0) + 1;
+
+    const dmg = this.shotDamage(bot, head, { flick, calm, execBonus });
+    R.registerHit(run, head, { bonusCombo: flick ? 3 : 0 });
     this.ui.hitmarker(head);
     if (head) sfx.headshot(); else sfx.hit();
-    const dmg = WEAPON.damage * (head ? WEAPON.headshotMultiplier : 1);
-    if (bot.damage(dmg)) this.killBot(bot, head);
+    if (flick) this.floatCenter('甩枪！', 'head');
+    if (head) R.onHeadshotInBulletTime(run);
+    if (run.bt) run.bt.hitBots.add(bot);
+
+    if (R.has(run, 'suppress')) { bot.suppress = Math.min(6, tr.count); bot.lastHitAt = this.time; }
+    if (R.has(run, 'trackshield') && !run.trackShieldUsed && tr.time >= 2) {
+      run.trackShieldUsed = true;
+      run.shield++;
+      sfx.shield();
+      this.floatCenter('跟枪护盾 +1', 'info');
+    }
+    const fullHeat = R.has(run, 'overheat') && run.heat >= 20;
+    if (fullHeat) bot.burn = { left: 2, acc: 0 };
+
+    if (bot.damage(dmg)) this.killBot(bot, { head, onetap: wasFull, fullHeat });
     if (head && R.has(run, 'headblast')) this.headBlast(bot.position.clone(), bot);
+    if (head && R.has(run, 'pierce')) this.pierce(hit.point, this.raycaster.ray.direction.clone(), bot, dmg);
   }
 
-  killBot(bot, head) {
+  // 一发子弹的伤害。所有加成都只作用于已经命中的子弹
+  shotDamage(bot, head, { flick = false, calm = false, execBonus = 0 } = {}) {
+    const run = this.run;
+    const guillotine = R.has(run, 'guillotine');
+    if (!head && guillotine) return 0;
+    let d = WEAPON.damage;
+    if (head) d *= guillotine ? 4 : WEAPON.headshotMultiplier;
+    if (head && R.has(run, 'lethal')) d += 1;
+    if (head) d += execBonus;
+    if (calm) d *= 2;
+    if (flick) d *= 3;
+    if (R.has(run, 'overheat')) d *= 1 + 0.05 * run.heat;
+    if (R.has(run, 'rend') && run.track.count % 4 === 0) d *= 3;
+    if (R.has(run, 'shred') && bot.type === 'heavy' && bot.hitsTaken >= 3) d += 1;
+    return d;
+  }
+
+  // 穿颅弹：从命中点沿弹道继续，最多再穿 2 个目标；打到身体就停下
+  pierce(from, dir, firstBot, shotDmg) {
+    const run = this.run;
+    const exclude = new Set([firstBot]);
+    let origin = from.clone().addScaledVector(dir, 0.05);
+    const rc = new THREE.Raycaster(origin, dir, 0, WEAPON.range);
+    for (let n = 0; n < 2; n++) {
+      rc.set(origin, dir);
+      const meshes = this.bots.filter((b) => !b.dead && !exclude.has(b)).flatMap((b) => b.hitMeshes);
+      const h = rc.intersectObjects(meshes, false)[0];
+      if (!h) break;
+      const { bot, part } = h.object.userData;
+      const head = part === 'head';
+      this.world.fx.tracer(origin, h.point, 0xffd166);
+      const dmg = head ? Math.ceil(shotDmg * 0.75) : (R.has(run, 'guillotine') ? 0 : 1);
+      R.registerHit(run, head, { extra: true });
+      if (bot.damage(dmg)) this.killBot(bot, { head, indirect: true });
+      exclude.add(bot);
+      origin = h.point.clone().addScaledVector(dir, 0.05);
+      if (!head) break;
+    }
+  }
+
+  tickBurn(bot, wdt) {
+    const burn = bot.burn;
+    burn.acc += wdt;
+    while (burn.acc >= 0.5 && burn.left > 0 && !bot.dead) {
+      burn.acc -= 0.5;
+      burn.left -= 0.5;
+      this.world.fx.burst(bot.headWorld, 0xff6b35, 4, 2);
+      if (bot.damage(1)) this.killBot(bot, { indirect: true });
+    }
+    if (burn.left <= 0) bot.burn = null;
+  }
+
+  // ctx：head 爆头击杀 / onetap 满血一枪打死 / indirect 爆炸穿透灼烧等间接击杀 / fullHeat 满热击杀
+  killBot(bot, ctx = {}) {
     if (bot.dead) return;
     const run = this.run;
-    const gold = R.killGold(run, bot.def.gold + (MOVEMENT.goldBonus[bot.move.mode] || 0));
+    let base = bot.def.gold + (MOVEMENT.goldBonus[bot.move.mode] || 0);
+    if (ctx.onetap && R.has(run, 'bounty')) base += 2;
+    const glance = ctx.head && R.has(run, 'glance') && bot.offscreenAt != null && this.time - bot.offscreenAt <= 1;
+    const gold = R.killGold(run, base, glance ? 2 : 1);
+    if (ctx.onetap && R.has(run, 'onetap')) R.refundAmmo(run, 2);
+    if (ctx.indirect && R.has(run, 'aftershock')) R.addCombo(run, 2);
+    R.onKillInBulletTime(run);
     const pos = bot.headWorld;
     this.world.fx.burst(pos, bot.def.color, bot.type === 'heavy' ? 26 : 14);
-    this.floatAt(pos, `+${gold}`, gold >= 10 ? 'gold big' : head ? 'gold head' : 'gold');
+    this.floatAt(pos, `+${gold}`, gold >= 10 ? 'gold big' : ctx.head ? 'gold head' : 'gold');
     sfx.kill();
     bot.remove();
-    if (R.has(run, 'frostkill')) {
-      for (const b of this.bots) if (!b.dead && b.position.distanceTo(bot.position) < 5) b.slowTime = 2;
-      this.world.fx.shockwave(bot.position, 5, 0x9bf6ff);
+    if (ctx.fullHeat && R.has(run, 'molten')) {
+      let near = null;
+      for (const b of this.bots) {
+        if (b.dead || b.burn) continue;
+        const d = b.position.distanceTo(bot.position);
+        if (d < 4 && (!near || d < near.d)) near = { b, d };
+      }
+      if (near) { near.b.burn = { left: 2, acc: 0 }; this.world.fx.shockwave(bot.position, 4, 0xff6b35); }
     }
+  }
+
+  onBulletTimeEnd() {
+    const bt = R.endBulletTime(this.run);
+    if (R.has(this.run, 'stasisround')) {
+      for (const b of bt.hitBots) if (!b.dead) b.slowTime = Math.max(b.slowTime, 1);
+    }
+    if (this.run.debtTime > 0) this.floatCenter('时间债：敌人加速', 'warn');
   }
 
   headBlast(center, source) {
     this.world.fx.shockwave(center, 3, 0xffd166);
     for (const b of [...this.bots]) {
       if (b === source || b.dead) continue;
-      if (b.position.distanceTo(center) < 3 && b.damage(1)) this.killBot(b, false);
+      if (b.position.distanceTo(center) < 3 && b.damage(1)) this.killBot(b, { indirect: true });
     }
   }
 
