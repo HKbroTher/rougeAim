@@ -158,10 +158,12 @@ export const SHOP = {
   healAmount: 30,
   healBasePrice: 25,
   healPriceStep: 15,
-  // 遗物：按稀有度定价
-  relicPrice: { common: 45, rare: 70 },
-  relicSlots: 2,
-  // 星尘：比同档遗物贵，同一局越买越贵，越深的商店兑换越多
+  // 强化：按类别定价；基础强化每升一级 +baseStep
+  upgradePrice: { base: 30, baseStep: 15, school: 55, general: 50, econ: 45, core: 95 },
+  schoolSlots: 2,        // 流派 / 通用货架数
+  coreInShop: 0.08,      // 流派货架换成核心的概率
+  econChance: 0.3,       // 出现经济货架的概率
+  // 星尘：比同档强化贵，同一局越买越贵，越深的商店兑换越多
   stardustBasePrice: 55,
   stardustPriceStep: 25,
   stardustYieldBase: 14,
@@ -171,7 +173,7 @@ export const SHOP = {
   priceGrowth: 0.12,
   // 哪些商店卖星尘（按商店序号，从 1 开始）。设为 null 表示全部商店都卖。
   stardustShops: null,
-  discountRelic: 0.8, // 「会员卡」折扣
+  discount: 0.8, // 「会员卡」折扣
 };
 
 // 结算星尘：按技术表现而不是存活时间
@@ -188,8 +190,29 @@ export const META_UPGRADES = [
   { id: 'vitality', kind: 'stat', name: '强健体魄', desc: '生命上限 +10', costs: [120, 240, 420] },
   { id: 'shield', kind: 'stat', name: '护盾发生器', desc: '每局开局获得 1 层护盾', costs: [180, 360] },
   { id: 'stake', kind: 'talent', name: '随身盘缠', desc: '开局携带 15 金币', costs: [150, 300] },
-  { id: 'extraChoice', kind: 'talent', name: '开局补给', desc: '开局额外进行一次遗物三选一', costs: [270] },
-  { id: 'unlock_hawkeye', kind: 'unlock', name: '解锁：鹰眼弹', desc: '遗物「鹰眼弹」进入奖池', costs: [150], relic: 'hawkeye' },
-  { id: 'unlock_starmap', kind: 'unlock', name: '解锁：星图', desc: '遗物「星图」进入奖池', costs: [180], relic: 'starmap' },
-  { id: 'unlock_bloodpact', kind: 'unlock', name: '解锁：血色契约', desc: '诅咒遗物「血色契约」进入奖池', costs: [210], relic: 'bloodpact' },
+  { id: 'extraChoice', kind: 'talent', name: '开局补给', desc: '开局额外进行一次强化三选一', costs: [270] },
+  // 核心强化解锁线：每个流派默认开放 1 个（断头台、弹鼓、余韵）
+  { id: 'unlock_pierce', kind: 'unlock', name: '解锁：穿颅弹', desc: '爆头流核心「穿颅弹」进入奖池', costs: [200], unlocks: 'pierce' },
+  { id: 'unlock_flickmaster', kind: 'unlock', name: '解锁：甩枪大师', desc: '爆头流核心「甩枪大师」进入奖池', costs: [250], unlocks: 'flickmaster' },
+  { id: 'unlock_overheat', kind: 'unlock', name: '解锁：过热枪管', desc: '扫射流核心「过热枪管」及其配套进入奖池', costs: [200], unlocks: 'overheat' },
+  { id: 'unlock_suppress', kind: 'unlock', name: '解锁：压制火力', desc: '扫射流核心「压制火力」进入奖池', costs: [250], unlocks: 'suppress' },
+  { id: 'unlock_stasis', kind: 'unlock', name: '解锁：时停', desc: '子弹时间流核心「时停」进入奖池', costs: [200], unlocks: 'stasis' },
+  { id: 'unlock_timedebt', kind: 'unlock', name: '解锁：时间债', desc: '子弹时间流核心「时间债」进入奖池', costs: [250], unlocks: 'timedebt' },
+  { id: 'unlock_hawkeye', kind: 'unlock', name: '解锁：鹰眼弹', desc: '爆头流强化「鹰眼弹」进入奖池', costs: [150], unlocks: 'hawkeye' },
+  { id: 'unlock_starmap', kind: 'unlock', name: '解锁：星图', desc: '经济强化「星图」进入奖池', costs: [180], unlocks: 'starmap' },
+  { id: 'unlock_bloodpact', kind: 'unlock', name: '解锁：血色契约', desc: '诅咒强化「血色契约」进入奖池', costs: [210], unlocks: 'bloodpact' },
+];
+
+// 遗物：每局开局选 1 个带进去。costs[0] 为 0 表示默认拥有 1 级。
+export const KEEPSAKES = [
+  { id: 'hunter', school: 'head', icon: '🎯', name: '猎手徽章', costs: [0, 200, 300],
+    levels: ['爆头额外 +1 连杀', '第一次三选一保底 1 个爆头流强化', '开局额外一次「爆头流三选一」'] },
+  { id: 'drum', school: 'spray', icon: '🥁', name: '旧弹鼓', costs: [0, 200, 300],
+    levels: ['弹匣 +4', '第一次三选一保底 1 个扫射流强化', '开局额外一次「扫射流三选一」'] },
+  { id: 'watch', school: 'time', icon: '⌚', name: '怀表', costs: [0, 200, 300],
+    levels: ['每波开始专注 +50%', '第一次三选一保底 1 个子弹时间流强化', '开局额外一次「子弹时间流三选一」'] },
+  { id: 'prism', school: null, icon: '🔺', name: '三棱镜', costs: [250],
+    levels: ['三选一的三个选项必定来自三个不同类别（爆头 / 扫射 / 子弹时间 / 基础），不受流派倾向影响'] },
+  { id: 'blank', school: null, icon: '⬜', name: '空白徽章', costs: [200],
+    levels: ['没有效果；结算星尘 +25%'] },
 ];

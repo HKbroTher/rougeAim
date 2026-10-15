@@ -121,7 +121,7 @@ export class SimAimer {
 
     // 战术换弹和子弹时间
     const near = g.bots.filter((b) => !b.dead && b.distance < 10).length;
-    if (run.ammo <= 3 && near === 0) g.tryReload();
+    if (run.ammo <= 3 && near === 0) g.tryReload(true);
     if (R.canActivateFocus(run) && near >= 3) g.tryFocus();
   }
 }
