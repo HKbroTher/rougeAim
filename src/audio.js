@@ -46,8 +46,13 @@ export const sfx = {
   hurt: () => tone({ freq: 140, freqEnd: 40, dur: 0.3, type: 'sawtooth', gain: 0.25 }),
   shield: () => tone({ freq: 700, freqEnd: 300, dur: 0.2, type: 'sine', gain: 0.2 }),
   focus: () => {
-    tone({ freq: 400, freqEnd: 1600, dur: 0.35, type: 'sine', gain: 0.18 });
+    tone({ freq: 900, freqEnd: 120, dur: 0.6, type: 'sine', gain: 0.22 });
   },
+  reloadStart: () => {
+    tone({ freq: 260, freqEnd: 180, dur: 0.06, type: 'square', gain: 0.1 });
+    tone({ freq: 220, freqEnd: 160, dur: 0.06, type: 'square', gain: 0.08, delay: 0.12 });
+  },
+  reloadDone: () => tone({ freq: 520, freqEnd: 760, dur: 0.07, type: 'square', gain: 0.12 }),
   coin: () => tone({ freq: 1200, freqEnd: 1800, dur: 0.06, type: 'sine', gain: 0.1 }),
   buy: () => {
     tone({ freq: 800, dur: 0.06, type: 'sine', gain: 0.15 });

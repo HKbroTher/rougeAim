@@ -28,11 +28,19 @@ export const RELICS = {
   },
   focuslens: {
     name: '专注透镜', rarity: 'common', icon: '◐',
-    desc: '专注充能速度 +50%，持续时间 +1 秒。',
+    desc: '专注充能速度 +50%，子弹时间 +1 秒。',
   },
   safety: {
     name: '保险栓', rarity: 'rare', icon: '⚿',
     desc: '每波第一次打空不会清零连杀。',
+  },
+  quickload: {
+    name: '精准装填', rarity: 'common', icon: '⟳',
+    desc: '爆头返还 1 发子弹（不超过弹匣上限）。',
+  },
+  extmag: {
+    name: '扩容弹匣', rarity: 'common', icon: '▥',
+    desc: '弹匣容量 +5。',
   },
   membercard: {
     name: '会员卡', rarity: 'common', icon: '▤', econ: true,

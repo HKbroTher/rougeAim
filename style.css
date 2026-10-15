@@ -67,6 +67,17 @@ button { font: inherit; }
 #focus-wrap.active #focus-fill { background: #fff; }
 @keyframes pulse { from { opacity: 0.6; } to { opacity: 1; } }
 
+#reload-ring { position: absolute; left: -22px; top: -22px; width: 44px; height: 44px; border-radius: 50%; opacity: 0;
+  background: conic-gradient(#fff calc(var(--p, 0) * 1turn), rgba(255,255,255,0.12) 0);
+  -webkit-mask: radial-gradient(circle, transparent 18px, #000 19px); mask: radial-gradient(circle, transparent 18px, #000 19px); }
+#reload-ring.on { opacity: 0.85; }
+#ammo-box { right: 16px; bottom: 16px; text-align: right; min-width: 130px; }
+#ammo { font-size: 34px; font-weight: 800; line-height: 1; }
+#ammo.low { color: var(--danger); }
+#ammo-hint { font-size: 12px; margin-top: 4px; }
+#ammo-hint.reloading { color: #fff; font-weight: 700; }
+#view.slowmo { filter: saturate(0.35) contrast(1.1); }
+
 #focus-overlay { position: absolute; inset: 0; opacity: 0; transition: opacity 0.2s;
   box-shadow: inset 0 0 160px 30px rgba(199, 125, 255, 0.55); }
 #focus-overlay.on { opacity: 1; }

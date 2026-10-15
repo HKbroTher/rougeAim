@@ -1,6 +1,6 @@
 // 主控制器：状态机（标题 → 战斗 → 遗物 → 商店 → … → 结算）、输入、射击与波次。
 import * as THREE from '../vendor/three.module.min.js';
-import { PLAYER, WEAPON, WAVES, ARENA, SETTLEMENT } from './config.js';
+import { PLAYER, WEAPON, WAVES, ARENA, SETTLEMENT, FOCUS } from './config.js';
 import { Bot } from './bots.js';
 import { UI } from './ui.js';
 import { createWorld } from './world.js';
@@ -31,6 +31,7 @@ export class Game {
     this.projM = new THREE.Matrix4();
     this.titleTab = 'play';
     this.timeScale = 1;
+    this.worldScale = 1; // 子弹时间：只影响敌人、出怪与特效，不影响玩家
     this.autoAim = false; // 仅 ?debug 下用于自动化冒烟测试，正式玩法不存在
     this.bindInput(canvas);
     this.toTitle();
@@ -65,6 +66,7 @@ export class Game {
         e.preventDefault();
         this.tryFocus();
       }
+      if (e.code === 'KeyR') this.tryReload();
     });
     document.addEventListener('pointerlockchange', () => {
       if (!this.locked() && this.state === 'combat' && !DEBUG) this.pause();
@@ -228,6 +230,7 @@ export class Game {
     run.waveIndex++;
     this.firing = false;
     run.focusTime = 0;
+    this.ui.endCombatFx();
     if (run.waveIndex >= WAVES.length) {
       this.finish(true);
       return;
@@ -261,6 +264,7 @@ export class Game {
     const run = this.run;
     if (this.shop) { R.closeShop(run, this.shop); this.shop = null; }
     this.state = 'results';
+    this.ui.endCombatFx();
     this.unlock();
     this.clearBots();
     this.ui.showHud(false);
@@ -307,25 +311,36 @@ export class Game {
   tryFocus() {
     if (R.activateFocus(this.run)) {
       sfx.focus();
-      this.ui.banner('专注');
+      this.ui.banner('子弹时间');
     }
+  }
+
+  tryReload() {
+    if (R.startReload(this.run)) sfx.reloadStart();
   }
 
   frame(now) {
     const dt = Math.min(0.05, (now - this.last) / 1000) * this.timeScale;
     this.last = now;
     if (this.state === 'combat') this.update(dt);
+    else this.worldScale = 1;
     this.camera.rotation.set(this.pitch, this.yaw, 0);
-    this.world.fx.update(dt);
+    this.world.fx.update(dt * this.worldScale);
     this.world.renderer.render(this.world.scene, this.camera);
     requestAnimationFrame((t) => this.frame(t));
   }
 
+  // dt 为真实时间：玩家的转身、射速、换弹、子弹时间计时都用它；
+  // wdt 为世界时间：敌人移动、出怪节奏、特效用它，子弹时间里会变慢。
   update(dt) {
     const run = this.run;
-    this.waveTime += dt;
-    this.time += dt;
     if (run.focusTime > 0) run.focusTime = Math.max(0, run.focusTime - dt);
+    const target = run.focusTime > 0 ? FOCUS.timeScale : 1;
+    const rate = dt / FOCUS.ramp;
+    this.worldScale += Math.max(-rate, Math.min(rate, target - this.worldScale));
+    const wdt = dt * this.worldScale;
+    this.waveTime += wdt;
+    this.time += dt;
 
     // 出怪
     const speedMul = this.waveDef.speedMul * R.enemySpeedMul(run);
@@ -347,15 +362,17 @@ export class Game {
     for (const bot of this.bots) {
       if (bot.dead) continue;
       if (bot.seenAt == null && this.frustum.containsPoint(bot.headWorld)) bot.seenAt = this.time;
-      if (bot.update(dt, 1)) this.botReachedPlayer(bot);
+      if (bot.update(wdt, 1)) this.botReachedPlayer(bot);
     }
     this.bots = this.bots.filter((b) => !b.dead);
 
-    // 射击
+    // 换弹与射击（真实时间）
+    if (R.tickReload(run, dt)) sfx.reloadDone();
     this.cooldown -= dt;
-    if (this.firing && this.cooldown <= 0 && this.state === 'combat') {
+    if (this.firing && this.cooldown <= 0 && this.state === 'combat' && !R.reloading(run)) {
       this.shoot();
       this.cooldown = R.fireInterval(run, WEAPON.fireInterval);
+      if (run.ammo <= 0) this.tryReload();
     }
 
     if (this.state !== 'combat') return;
@@ -368,6 +385,7 @@ export class Game {
   shoot() {
     const run = this.run;
     run.stats.shots++;
+    run.ammo--;
     sfx.shot();
     this.raycaster.setFromCamera(this.center, this.camera);
     const meshes = this.bots.flatMap((b) => b.hitMeshes);
@@ -378,7 +396,6 @@ export class Game {
       this.world.fx.tracer(muzzle, end, 0x8899bb);
       const res = R.registerMiss(run);
       if (res === 'broken') { sfx.comboBreak(); this.ui.comboBreak(); }
-      else if (res === 'protected') this.floatCenter('专注保护', 'info');
       else if (res === 'safety') this.floatCenter('保险栓', 'info');
       else sfx.miss();
       return;
