@@ -168,11 +168,12 @@ export class UI {
         ${this.statCard('精准度', `${(avg('accuracy') * 100).toFixed(1)}%`, this.spark(series('accuracy')))}
         ${this.statCard('爆头率', `${(avg('hsRate') * 100).toFixed(1)}%`, this.spark(series('hsRate')))}
         ${this.statCard('甩枪反应', reactions.length ? `${Math.round(avg('reactionMs'))}ms` : '—', this.spark(reactions.map((v) => -v)))}
+        ${this.statCard('移动目标命中率', series('moverAcc').length ? `${(avg('moverAcc') * 100).toFixed(1)}%` : '—', this.spark(series('moverAcc')))}
         ${this.statCard('平均最高连杀', avg('maxCombo').toFixed(1), this.spark(series('maxCombo')))}
         ${this.statCard('历史最高连杀', best('maxCombo'))}
         ${this.statCard('最远到达', `第 ${best('waves')} 波`)}
       </div>
-      <p class="small dim">曲线为全部记录（左旧右新）。甩枪反应 = bot 进入视野到你第一次命中它的时间，曲线越高代表越快。</p>
+      <p class="small dim">曲线为全部记录（左旧右新）。甩枪反应 = bot 进入视野到你第一次命中它的时间，曲线越高代表越快。移动目标命中率 = 对带机动的 bot 的命中 /（命中 + 打在它附近的空枪）。</p>
       <h3>最近 ${last.length} 局</h3>
       <table><tr><th>时间</th><th>结果</th><th>波数</th><th>精准</th><th>爆头率</th><th>最高连杀</th><th>反应</th><th>星尘</th></tr>
       ${last.map((r) => `<tr><td>${new Date(r.date).toLocaleString()}</td><td>${r.victory ? '<span style="color:var(--good)">通关</span>' : '阵亡'}</td>
@@ -323,6 +324,7 @@ export class UI {
           ${this.statCard('精准度', `${(summary.accuracy * 100).toFixed(1)}%`)}
           ${this.statCard('击杀', summary.kills)}
           ${this.statCard('甩枪反应', summary.reactionMs ? `${Math.round(summary.reactionMs)}ms` : '—')}
+          ${this.statCard('移动目标命中率', summary.moverAcc != null ? `${(summary.moverAcc * 100).toFixed(1)}%` : '—')}
           ${this.statCard('获得星尘', `<span class="stardust">+${summary.stardust}</span>`)}
         </div>
         <h3>星尘结算</h3>

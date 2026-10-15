@@ -1,14 +1,17 @@
 // 主控制器：状态机（标题 → 战斗 → 遗物 → 商店 → … → 结算）、输入、射击与波次。
 import * as THREE from '../vendor/three.module.min.js';
-import { PLAYER, WEAPON, WAVES, ARENA, SETTLEMENT, FOCUS, THREAT } from './config.js';
+import { PLAYER, WEAPON, WAVES, ARENA, SETTLEMENT, FOCUS, THREAT, MOVEMENT, rollMove } from './config.js';
 import { Bot } from './bots.js';
 import { UI } from './ui.js';
 import { createWorld } from './world.js';
 import { initAudio, setVolume, sfx } from './audio.js';
 import { loadSave, persist, resetSave, buyUpgrade, recordRun } from './meta.js';
 import * as R from './run.js';
+import { SimAimer, SKILLS } from './simaim.js';
 
-const DEBUG = new URLSearchParams(location.search).has('debug');
+const params = new URLSearchParams(location.search);
+const DEBUG = params.has('debug');
+const NORENDER = DEBUG && params.has('norender'); // 平衡测试时跳过渲染以加速
 
 export class Game {
   constructor(canvas) {
@@ -37,7 +40,7 @@ export class Game {
     this.toTitle();
     this.last = performance.now();
     requestAnimationFrame((t) => this.frame(t));
-    if (DEBUG) window.game = this;
+    if (DEBUG) Object.assign(window, { game: this, SimAimer, SKILLS });
   }
 
   // ---------------- 输入 ----------------
@@ -227,6 +230,7 @@ export class Game {
 
   endWave() {
     const run = this.run;
+    R.logWaveEnd(run, true);
     run.waveIndex++;
     this.firing = false;
     run.focusTime = 0;
@@ -262,6 +266,7 @@ export class Game {
 
   finish(victory) {
     const run = this.run;
+    R.logWaveEnd(run, false);
     if (this.shop) { R.closeShop(run, this.shop); this.shop = null; }
     this.state = 'results';
     this.ui.endCombatFx();
@@ -289,6 +294,7 @@ export class Game {
       accuracy: s.shots ? s.hits / s.shots : 0,
       hsRate: s.hits ? s.headshots / s.hits : 0,
       reactionMs: reactions.length ? reactions.reduce((a, b) => a + b, 0) / reactions.length : null,
+      moverAcc: s.moverHits + s.moverMisses >= 10 ? s.moverHits / (s.moverHits + s.moverMisses) : null,
       goldEarned: s.goldEarned,
       stardust,
       relics: [...run.relics],
@@ -326,7 +332,7 @@ export class Game {
     else this.worldScale = 1;
     this.camera.rotation.set(this.pitch, this.yaw, 0);
     this.world.fx.update(dt * this.worldScale);
-    this.world.renderer.render(this.world.scene, this.camera);
+    if (!NORENDER) this.world.renderer.render(this.world.scene, this.camera);
     requestAnimationFrame((t) => this.frame(t));
   }
 
@@ -346,12 +352,13 @@ export class Game {
     const speedMul = this.waveDef.speedMul * R.enemySpeedMul(run);
     while (this.spawnQueue.length && this.spawnQueue[0].at <= this.waveTime) {
       const s = this.spawnQueue.shift();
-      const bot = new Bot(s.type, this.world.scene, s.angle, ARENA.spawnRadius, speedMul);
+      const bot = new Bot(s.type, this.world.scene, s.angle, ARENA.spawnRadius, speedMul, rollMove(this.waveDef, s.type));
       bot.spawnedAt = this.time;
       this.bots.push(bot);
     }
 
     if (this.autoAim) this.debugAim();
+    if (this.sim) this.sim.update(dt);
     this.camera.rotation.set(this.pitch, this.yaw, 0);
 
     // 视野检测：用于「甩枪反应」统计
@@ -395,6 +402,8 @@ export class Game {
     if (!hit) {
       const end = this.raycaster.ray.at(60, new THREE.Vector3());
       this.world.fx.tracer(muzzle, end, 0x8899bb);
+      const near = this.nearestToCrosshair(0.09);
+      if (near && near.mobile) run.stats.moverMisses++;
       const res = R.registerMiss(run);
       if (res === 'broken') { sfx.comboBreak(); this.ui.comboBreak(); }
       else if (res === 'safety') this.floatCenter('保险栓', 'info');
@@ -408,6 +417,7 @@ export class Game {
       bot.firstHitAt = this.time;
       if (bot.seenAt != null) (this.reactions ||= []).push((this.time - bot.seenAt) * 1000);
     }
+    if (bot.mobile) run.stats.moverHits++;
     R.registerHit(run, head);
     this.ui.hitmarker(head);
     if (head) sfx.headshot(); else sfx.hit();
@@ -419,7 +429,7 @@ export class Game {
   killBot(bot, head) {
     if (bot.dead) return;
     const run = this.run;
-    const gold = R.killGold(run, bot.def.gold);
+    const gold = R.killGold(run, bot.def.gold + (MOVEMENT.goldBonus[bot.move.mode] || 0));
     const pos = bot.headWorld;
     this.world.fx.burst(pos, bot.def.color, bot.type === 'heavy' ? 26 : 14);
     this.floatAt(pos, `+${gold}`, gold >= 10 ? 'gold big' : head ? 'gold head' : 'gold');
@@ -457,6 +467,21 @@ export class Game {
   }
 
   // ---------------- 辅助 ----------------
+
+  // 打空时离准星最近（角度小于 maxAngle 弧度）的 bot，用来估算「对移动目标的命中率」
+  nearestToCrosshair(maxAngle) {
+    const ray = this.raycaster.ray;
+    const v = new THREE.Vector3();
+    let best = null;
+    let bestAng = maxAngle;
+    for (const b of this.bots) {
+      if (b.dead) continue;
+      v.copy(b.position).setY(b.position.y + b.bodyH * 0.7).sub(ray.origin).normalize();
+      const ang = Math.acos(Math.min(1, v.dot(ray.direction)));
+      if (ang < bestAng) { bestAng = ang; best = b; }
+    }
+    return best;
+  }
 
   offscreenThreats() {
     const out = [];
