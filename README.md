@@ -14,6 +14,16 @@ python3 -m http.server 8000
 # 打开 http://localhost:8000
 ```
 
+### 在公共电脑 / 不能装软件的电脑上玩
+
+- **网页版（推荐）**：开启 GitHub Pages 后，直接打开 <https://hkbrother.github.io/rougeAim/>。
+  开启方法：仓库 Settings → Pages → Source 选 *Deploy from a branch*，分支选 `main`、目录选 `/ (root)` → Save，等 1–2 分钟。
+- **单文件版**：下载 [`dist/rogueaim.html`](dist/rogueaim.html)（在 GitHub 上点文件 → 右上角下载按钮），双击用 Chrome / Edge / Firefox 打开即可，不需要网络和服务器。
+  修改代码后用 `node tools/build-single.mjs` 重新生成。
+
+存档（星尘、工坊、枪法档案）保存在浏览器的 localStorage 里，只留在这台电脑这个浏览器上。
+无痕模式关掉窗口就会清空；在别人的电脑上玩完，可以在「设置」里清空存档。
+
 ## 操作
 
 | 按键 | 作用 |
@@ -67,6 +77,7 @@ src/bots.js     bot 模型与移动
 src/world.js    场景、相机、特效
 src/ui.js       HUD 与所有界面
 tools/smoke.mjs 冒烟测试：自动跑完整一局
+tools/build-single.mjs 打包成单文件 dist/rogueaim.html
 vendor/         three.js r169（MIT）
 ```
 
