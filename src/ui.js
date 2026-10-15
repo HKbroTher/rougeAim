@@ -35,7 +35,37 @@ export class UI {
     this.screen.innerHTML = '';
   }
 
+  // 视野外近身威胁：在屏幕边缘对应方向画红光。rel = 相对视线的角度，正数在右；k = 0..1 的危险程度
+  drawThreats(threats, time) {
+    const cv = $('threat');
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+    const c = cv.getContext('2d');
+    c.clearRect(0, 0, W, H);
+    if (!threats.length) return;
+    const cx = W / 2;
+    const cy = H / 2;
+    const rad = Math.min(W, H) * 0.45;
+    for (const { rel, k } of threats) {
+      // 方向映射到屏幕边缘：正前 = 上，正后 = 下，右 = 右
+      const sx = Math.sin(rel);
+      const sy = -Math.cos(rel);
+      const scale = Math.min(cx / Math.max(1e-3, Math.abs(sx)), cy / Math.max(1e-3, Math.abs(sy)));
+      const x = cx + sx * scale;
+      const y = cy + sy * scale;
+      const pulse = 0.75 + 0.25 * Math.sin(time * (6 + 10 * k));
+      const a = Math.min(0.85, 0.25 + 0.6 * k) * pulse;
+      const g = c.createRadialGradient(x, y, 0, x, y, rad * (0.6 + 0.4 * k));
+      g.addColorStop(0, `rgba(255, 30, 55, ${a})`);
+      g.addColorStop(1, 'rgba(255, 30, 55, 0)');
+      c.fillStyle = g;
+      c.fillRect(0, 0, W, H);
+    }
+  }
+
   endCombatFx() {
+    this.drawThreats([], 0);
     $('view').classList.remove('slowmo');
     $('focus-overlay').classList.remove('on');
   }
@@ -158,7 +188,8 @@ export class UI {
       ${this.spendBlock(s)}
       <h3>当前价格</h3>
       <div class="small">回血 ${SHOP.healBasePrice}（每买一次 +${SHOP.healPriceStep}）· 遗物 普通 ${SHOP.relicPrice.common} / 稀有 ${SHOP.relicPrice.rare} ·
-        星尘 ${SHOP.stardustBasePrice}（每买一次 +${SHOP.stardustPriceStep}，兑换量 ${SHOP.stardustYieldBase}+${SHOP.stardustYieldPerDepth}×深度）</div>
+        星尘 ${SHOP.stardustBasePrice}（每买一次 +${SHOP.stardustPriceStep}，兑换量 ${SHOP.stardustYieldBase}+${SHOP.stardustYieldPerDepth}×深度）。
+        以上为第 0 层基础价，实际价格 ×(1 + ${SHOP.priceGrowth}×深度)。</div>
       <div style="margin-top:14px"><button class="btn danger" data-action="clearLog">清空商店日志</button></div>`;
   }
 
@@ -212,15 +243,16 @@ export class UI {
 
   // ---------------- 局内界面 ----------------
 
-  relicCard(id, { action, slot, price, gold, sold } = {}) {
+  relicCard(id, { action, slot, price, gold, sold, run } = {}) {
     const r = RELICS[id];
     const cls = ['item', r.rarity === 'rare' ? 'rare' : '', r.curse ? 'curse' : '', sold ? 'sold' : ''].join(' ');
-    const tag = `${r.rarity === 'rare' ? '稀有' : '普通'}${r.econ ? ' · 经济' : ''}${r.curse ? ' · 诅咒' : ''}`;
+    const tag = r.supply ? '补给 · 立即生效' : `${r.rarity === 'rare' ? '稀有' : '普通'}${r.econ ? ' · 经济' : ''}${r.curse ? ' · 诅咒' : ''}`;
+    const desc = id === 'sup_gold' && run ? `立即获得 ${R.supplyGold(run)} 金币。` : r.desc;
     const priceHtml = price != null ? `<div class="price ${gold < price ? 'no' : ''}">${sold ? '已售出' : `● ${price}`}</div>` : '';
     const disabled = sold || (price != null && gold < price) ? 'disabled' : '';
     return `<button class="${cls}" data-action="${action}" data-id="${id}" data-slot="${slot ?? ''}" ${disabled}>
       <div class="icon">${r.icon}</div><div class="name">${r.name}</div><div class="tag">${tag}</div>
-      <div class="desc">${r.desc}</div>${priceHtml}</button>`;
+      <div class="desc">${desc}</div>${priceHtml}</button>`;
   }
 
   reward(run, choices, title) {
@@ -228,7 +260,7 @@ export class UI {
       <div class="card">
         <h2>${title}</h2>
         <p class="dim small">免费三选一。遗物只会奖励精准，不会替你瞄准。</p>
-        <div class="choices">${choices.map((id) => this.relicCard(id, { action: 'pickRelic' })).join('')}</div>
+        <div class="choices">${choices.map((id) => this.relicCard(id, { action: 'pickRelic', run })).join('')}</div>
         <div class="row"><div class="grow small dim">已有遗物：${run.relics.map((id) => RELICS[id].name).join('、') || '无'}</div>
         <button class="btn ghost" data-action="skipReward">跳过</button></div>
       </div>`);
@@ -295,7 +327,7 @@ export class UI {
         </div>
         <h3>星尘结算</h3>
         <table>
-          <tr><td>最高连杀 ${summary.maxCombo} × ${SETTLEMENT.perMaxCombo}</td><td class="stardust">+${settlement.combo}</td></tr>
+          <tr><td>${SETTLEMENT.comboSqrt} × √最高连杀 ${summary.maxCombo}</td><td class="stardust">+${settlement.combo}</td></tr>
           <tr><td>爆头 ${summary.headshots} × ${SETTLEMENT.perHeadshot}</td><td class="stardust">+${settlement.headshots}</td></tr>
           <tr><td>到达深度 ${summary.waves} 波 × ${SETTLEMENT.perWave}</td><td class="stardust">+${settlement.depth}</td></tr>
           ${summary.victory ? `<tr><td>通关奖励</td><td class="stardust">+${settlement.victory}</td></tr>` : ''}

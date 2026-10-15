@@ -14,11 +14,11 @@ await page.goto(url);
 await page.waitForFunction(() => window.game);
 await page.screenshot({ path: `${shots}/01-title.png` });
 await page.click('[data-action=start]');
-await page.evaluate(() => { game.autoAim = true; game.timeScale = 2; });
+await page.evaluate(() => { game.autoAim = true; game.timeScale = 3; });
 
 let shopShot = false;
 let combatShot = false;
-for (let i = 0; i < 600; i++) {
+for (let i = 0; i < 3000; i++) {
   const state = await page.evaluate(() => game.state);
   if (state === 'combat' && !combatShot && (await page.evaluate(() => game.bots.length)) > 3) {
     await page.screenshot({ path: `${shots}/02-combat.png` });
@@ -36,7 +36,15 @@ for (let i = 0; i < 600; i++) {
   }
   await page.waitForTimeout(500);
 }
-const summary = await page.evaluate(() => ({ state: game.state, summary: game.lastSummary, save: { stardust: game.save.stardust, runs: game.save.runs.length, shopLog: game.save.shopLog.length } }));
+const summary = await page.evaluate(() => {
+  const { relics, ...s } = game.lastSummary || {};
+  return {
+    state: game.state,
+    summary: s,
+    relics: relics?.length,
+    shops: game.save.shopLog.map((v) => `#${v.shop} 金币${v.goldIn} 生命${v.hpIn}/${v.maxHp}`),
+  };
+});
 await page.screenshot({ path: `${shots}/04-results.png` });
 await page.click('[data-action=toTitle]');
 await page.click('[data-action=tab][data-tab=tuning]');

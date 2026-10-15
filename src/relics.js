@@ -65,9 +65,17 @@ export const RELICS = {
   },
 };
 
+// 补给：20 波里遗物池会被拿空，三选一凑不满时用补给补位。补给立即生效，不进遗物栏。
+export const SUPPLIES = ['sup_gold', 'sup_heal', 'sup_maxhp'];
+Object.assign(RELICS, {
+  sup_gold: { name: '金币袋', rarity: 'common', icon: '●', supply: true, desc: '立即获得金币（数量随深度增长）。' },
+  sup_heal: { name: '急救包', rarity: 'common', icon: '✚', supply: true, desc: '立即恢复 40 点生命。' },
+  sup_maxhp: { name: '强化体质', rarity: 'common', icon: '♥', supply: true, desc: '本局生命上限 +10，并恢复 10 点生命。' },
+});
+
 export function relicPool(unlocked, owned) {
   return Object.keys(RELICS).filter(
-    (id) => !owned.includes(id) && (!RELICS[id].locked || unlocked.includes(id)),
+    (id) => !RELICS[id].supply && !owned.includes(id) && (!RELICS[id].locked || unlocked.includes(id)),
   );
 }
 

@@ -1,6 +1,6 @@
 // 主控制器：状态机（标题 → 战斗 → 遗物 → 商店 → … → 结算）、输入、射击与波次。
 import * as THREE from '../vendor/three.module.min.js';
-import { PLAYER, WEAPON, WAVES, ARENA, SETTLEMENT, FOCUS } from './config.js';
+import { PLAYER, WEAPON, WAVES, ARENA, SETTLEMENT, FOCUS, THREAT } from './config.js';
 import { Bot } from './bots.js';
 import { UI } from './ui.js';
 import { createWorld } from './world.js';
@@ -270,7 +270,7 @@ export class Game {
     this.ui.showHud(false);
     const s = run.stats;
     const settlement = {
-      combo: Math.floor(run.maxCombo * SETTLEMENT.perMaxCombo),
+      combo: Math.floor(SETTLEMENT.comboSqrt * Math.sqrt(run.maxCombo)),
       headshots: Math.floor(s.headshots * SETTLEMENT.perHeadshot),
       depth: run.waveIndex * SETTLEMENT.perWave,
       victory: victory ? SETTLEMENT.victoryBonus : 0,
@@ -378,6 +378,7 @@ export class Game {
     if (this.state !== 'combat') return;
     this.ui.updateHud(run, `${this.waveDef.name} / ${WAVES.length}`, this.bots.length + this.spawnQueue.length);
     this.ui.drawRadar(this.bots, this.yaw);
+    this.ui.drawThreats(this.offscreenThreats(), this.time);
 
     if (!this.spawnQueue.length && !this.bots.length) this.endWave();
   }
@@ -456,6 +457,24 @@ export class Game {
   }
 
   // ---------------- 辅助 ----------------
+
+  offscreenThreats() {
+    const out = [];
+    const v = new THREE.Vector3();
+    for (const b of this.bots) {
+      if (b.dead) continue;
+      const d = b.distance;
+      if (d > THREAT.range) continue;
+      v.set(b.position.x, 1, b.position.z);
+      if (this.frustum.containsPoint(v)) continue;
+      // 相对视线的水平角：0 = 正前，正数 = 右侧
+      let rel = this.yaw + Math.PI - Math.atan2(b.position.x, b.position.z);
+      rel = Math.atan2(Math.sin(rel), Math.cos(rel));
+      const k = 1 - Math.max(0, d - PLAYER.hitRadius) / (THREAT.range - PLAYER.hitRadius);
+      out.push({ rel, k });
+    }
+    return out;
+  }
 
   floatAt(worldPos, text, cls) {
     const v = worldPos.clone().project(this.camera);
