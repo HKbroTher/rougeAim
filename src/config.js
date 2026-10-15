@@ -72,17 +72,35 @@ export const THREAT = {
 export const WAVE_COUNT = 20;
 
 export const WAVE_CURVE = {
-  countBase: 8,          // 第 1 波敌人数
+  countBase: 10,         // 第 1 波敌人数
   countLinear: 1.6,      // 每波线性增加
-  countQuad: 0.06,       // 二次项，让后期密度加速上升
-  intervalBase: 1.3,     // 第 1 波平均出怪间隔（秒）
-  intervalDecay: 0.93,   // 每波乘以该系数
-  intervalMin: 0.35,
-  speedPerWave: 0.02,    // 每波敌人速度 +2%（第 20 波 1.38x）
+  countQuad: 0.03,       // 二次项，让后期密度略微加速上升
+  intervalBase: 1.1,     // 第 1 波平均出怪间隔（秒）
+  intervalDecay: 0.95,   // 每波乘以该系数
+  intervalMin: 0.5,      // 加入机动后，后期出怪密度上限放宽（原 0.35）
+  speedPerWave: 0.015,   // 每波敌人速度 +1.5%（第 20 波 1.29x）
   arcBase: 120,          // 第 1 波出怪扇区（度）
   arcPerWave: 40,        // 每波扩大，第 7 波起 360°
   chargerFrom: 2, chargerPerWave: 0.035, chargerMax: 0.38,
   heavyFrom: 3, heavyPerWave: 0.012, heavyMax: 0.2,
+  // 机动：从第 moveFrom 波开始，一部分普通兵 / 冲锋兵带横向或垂直机动，比例和幅度逐波上升。
+  // 重甲兵永远直线（它练的是跟枪，不是预判）。
+  moveFrom: 4,
+  moverShareBase: 0.15, moverSharePerWave: 0.04, moverShareMax: 0.65,
+  ampBase: 0.8, ampPerWave: 0.1, ampMax: 2.5,          // 横向幅度（米）
+  freqBase: 0.35, freqPerWave: 0.02, freqMax: 0.7,     // 横移频率（Hz）
+  jumpFrom: 6,
+  adadFrom: 9,
+  adadSpeedBase: 2.2, adadSpeedPerWave: 0.1, adadSpeedMax: 3.4, // ADAD 横移速度（m/s）
+};
+
+// 机动的物理参数（与波次无关）
+export const MOVEMENT = {
+  convergeDistance: 8,   // 距离玩家小于该值时横向幅度线性收拢到 0
+  chargerAmpMul: 0.5,    // 冲锋兵只做小幅横移
+  jump: { height: 1.3, gravity: 20, intervalMin: 1.6, intervalMax: 2.8, crouchTime: 0.25, landLag: 0.3 },
+  adad: { accel: 16, holdMin: 0.35, holdMax: 0.9, flipChance: 0.8 },
+  goldBonus: { sine: 1, jump: 1, adad: 2 }, // 机动目标更难打，多给金币
 };
 
 function makeWave(n) {
@@ -96,9 +114,19 @@ function makeWave(n) {
   const count = { normal: total - charger - heavy };
   if (charger) count.charger = charger;
   if (heavy) count.heavy = heavy;
+  const m = n - c.moveFrom;
+  const mobility = n < c.moveFrom ? null : {
+    share: Math.min(c.moverShareMax, c.moverShareBase + c.moverSharePerWave * m),
+    amp: Math.min(c.ampMax, c.ampBase + c.ampPerWave * m),
+    freq: Math.min(c.freqMax, c.freqBase + c.freqPerWave * m),
+    jump: n >= c.jumpFrom,
+    adad: n >= c.adadFrom,
+    adadSpeed: Math.min(c.adadSpeedMax, c.adadSpeedBase + c.adadSpeedPerWave * (n - c.adadFrom)),
+  };
   return {
     n,
     name: `第 ${n} 波`,
+    mobility,
     count,
     total,
     interval: Math.max(c.intervalMin, c.intervalBase * c.intervalDecay ** k),
@@ -108,6 +136,22 @@ function makeWave(n) {
 }
 
 export const WAVES = Array.from({ length: WAVE_COUNT }, (_, i) => makeWave(i + 1));
+
+// 为本波的一个 bot 抽取机动方式
+export function rollMove(wave, type) {
+  const mob = wave.mobility;
+  if (!mob || type === 'heavy' || Math.random() >= mob.share) return { mode: 'none' };
+  const modes = [['sine', 1]];
+  if (type === 'normal' && mob.jump) modes.push(['jump', 0.7]);
+  if (type === 'normal' && mob.adad) modes.push(['adad', 0.7]);
+  let r = Math.random() * modes.reduce((a, [, w]) => a + w, 0);
+  let mode = modes[0][0];
+  for (const [id, w] of modes) { r -= w; if (r <= 0) { mode = id; break; } }
+  const ampMul = type === 'charger' ? MOVEMENT.chargerAmpMul : 1;
+  if (mode === 'sine') return { mode, amp: mob.amp * ampMul, freq: mob.freq };
+  if (mode === 'jump') return { mode, amp: 0, height: MOVEMENT.jump.height };
+  return { mode, amp: mob.amp, speed: mob.adadSpeed };
+}
 
 export const SHOP = {
   // 回血：价格随本局购买次数上涨
@@ -121,7 +165,7 @@ export const SHOP = {
   stardustBasePrice: 55,
   stardustPriceStep: 25,
   stardustYieldBase: 14,
-  stardustYieldPerDepth: 6, // depth = 已通过的波数
+  stardustYieldPerDepth: 4, // depth = 已通过的波数
   // 所有金币价格（含每次购买的涨价幅度）乘以 1 + priceGrowth × depth，
   // 与每波收入的增长大致同步；星尘兑换量的增长更快，所以越深兑换比例越好。
   priceGrowth: 0.12,
@@ -138,13 +182,14 @@ export const SETTLEMENT = {
   victoryBonus: 50,
 };
 
-// 局外星尘工坊：解锁为主，数值只给宽容度且有上限
+// 局外星尘工坊：解锁为主，数值只给宽容度且有上限。
+// 价格按模拟测试定：普通水平一局约 450 星尘（其中一半以上来自商店兑换），全部买完约需 6 局。
 export const META_UPGRADES = [
-  { id: 'vitality', kind: 'stat', name: '强健体魄', desc: '生命上限 +10', costs: [40, 80, 140] },
-  { id: 'shield', kind: 'stat', name: '护盾发生器', desc: '每局开局获得 1 层护盾', costs: [60, 120] },
-  { id: 'stake', kind: 'talent', name: '随身盘缠', desc: '开局携带 15 金币', costs: [50, 100] },
-  { id: 'extraChoice', kind: 'talent', name: '开局补给', desc: '开局额外进行一次遗物三选一', costs: [90] },
-  { id: 'unlock_hawkeye', kind: 'unlock', name: '解锁：鹰眼弹', desc: '遗物「鹰眼弹」进入奖池', costs: [50], relic: 'hawkeye' },
-  { id: 'unlock_starmap', kind: 'unlock', name: '解锁：星图', desc: '遗物「星图」进入奖池', costs: [60], relic: 'starmap' },
-  { id: 'unlock_bloodpact', kind: 'unlock', name: '解锁：血色契约', desc: '诅咒遗物「血色契约」进入奖池', costs: [70], relic: 'bloodpact' },
+  { id: 'vitality', kind: 'stat', name: '强健体魄', desc: '生命上限 +10', costs: [120, 240, 420] },
+  { id: 'shield', kind: 'stat', name: '护盾发生器', desc: '每局开局获得 1 层护盾', costs: [180, 360] },
+  { id: 'stake', kind: 'talent', name: '随身盘缠', desc: '开局携带 15 金币', costs: [150, 300] },
+  { id: 'extraChoice', kind: 'talent', name: '开局补给', desc: '开局额外进行一次遗物三选一', costs: [270] },
+  { id: 'unlock_hawkeye', kind: 'unlock', name: '解锁：鹰眼弹', desc: '遗物「鹰眼弹」进入奖池', costs: [150], relic: 'hawkeye' },
+  { id: 'unlock_starmap', kind: 'unlock', name: '解锁：星图', desc: '遗物「星图」进入奖池', costs: [180], relic: 'starmap' },
+  { id: 'unlock_bloodpact', kind: 'unlock', name: '解锁：血色契约', desc: '诅咒遗物「血色契约」进入奖池', costs: [210], relic: 'bloodpact' },
 ];

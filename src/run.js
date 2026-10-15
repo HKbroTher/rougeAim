@@ -26,8 +26,9 @@ export function createRun(save) {
     stardustFromShop: 0,
     safetyUsed: false,
     chainStacks: 0,
-    stats: { shots: 0, hits: 0, headshots: 0, kills: 0, goldEarned: 0, damageTaken: 0, misses: 0, comboBreaks: 0, reloads: 0 },
+    stats: { shots: 0, hits: 0, headshots: 0, kills: 0, goldEarned: 0, damageTaken: 0, misses: 0, comboBreaks: 0, reloads: 0, moverHits: 0, moverMisses: 0 },
     shopVisits: [],
+    waveLog: [], // 每波的血量、命中、金币变化，用于平衡分析
   };
 }
 
@@ -137,7 +138,20 @@ export function takeDamage(run, dmg) {
   return { absorbed: false, dead: run.hp <= 0 };
 }
 
+function snapshot(run) {
+  const s = run.stats;
+  return { hp: run.hp, shield: run.shield, shots: s.shots, hits: s.hits, gold: s.goldEarned, dmg: s.damageTaken, mh: s.moverHits, mm: s.moverMisses };
+}
+
+export function logWaveEnd(run, cleared) {
+  const w = run.waveLog[run.waveLog.length - 1];
+  if (!w || w.end) return;
+  w.end = snapshot(run);
+  w.cleared = cleared;
+}
+
 export function startWave(run) {
+  run.waveLog.push({ wave: run.waveIndex + 1, start: snapshot(run) });
   run.safetyUsed = false;
   run.ammo = magSize(run);
   run.reloadLeft = 0;
