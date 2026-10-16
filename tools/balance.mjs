@@ -49,9 +49,13 @@ async function playOne(i) {
         const r = game.run;
         const click = (sel) => { const b = document.querySelector(sel); if (b && !b.disabled) { b.click(); return true; } return false; };
         for (let k = 0; k < 4 && r.hp / r.maxHp < 0.6; k++) if (!click('[data-action=buyHeal]')) break;
-        const items = [...document.querySelectorAll('[data-action=buyItem]')].filter((b) => !b.disabled);
-        const want = items.find((b) => b.dataset.school === window.__school) || (window.__school && window.__school !== 'random' ? items.find((b) => b.dataset.cat === 'base') : items[0]);
-        if (want) want.click();
+        // 能买几个买几个：优先本流派，其次基础，最后随便
+        for (let k = 0; k < 3; k++) {
+          const items = [...document.querySelectorAll('[data-action=buyItem]')].filter((b) => !b.disabled);
+          const want = items.find((b) => b.dataset.school === window.__school) || items.find((b) => b.dataset.cat === 'base') || items[0];
+          if (!want) break;
+          want.click();
+        }
         const sd = document.querySelector('[data-action=buyStardust]');
         if (sd && !sd.disabled && r.gold > 1.6 * Number(sd.querySelector('.price').textContent.replace(/\D/g, ''))) sd.click();
         game.onAction('leaveShop', {});
@@ -73,7 +77,7 @@ async function playOne(i) {
         acc: w.end && w.end.shots - w.start.shots ? (w.end.hits - w.start.hits) / (w.end.shots - w.start.shots) : null,
         gold: w.end ? w.end.gold - w.start.gold : 0,
       })),
-      shops: r.shopVisits.map((v) => v.goldIn),
+      shops: r.shopVisits.map((v) => ({ goldIn: v.goldIn, bought: v.purchases.filter((p) => p.kind === 'upgrade').length, left: v.goldOut, prices: v.offered.items })),
     };
   });
   await ctx.close();
@@ -104,6 +108,13 @@ const hurt = {};
 for (const r of results) for (const [k, v] of Object.entries(r.hurtBy)) hurt[k] = (hurt[k] || 0) + v;
 const hurtTotal = Object.values(hurt).reduce((a, b) => a + b, 0) || 1;
 console.log(`被碰到的来源（共 ${hurtTotal} 次）：${Object.entries(hurt).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${Math.round((v / hurtTotal) * 100)}%`).join('，')}`);
+// 商店：每家店进店金币、买了几个强化、剩多少、货架均价
+const byShop = {};
+for (const r of results) r.shops.forEach((sh, i) => { (byShop[i + 1] ||= []).push(sh); });
+for (const [n, arr] of Object.entries(byShop)) {
+  const avgPrice = avg(arr.flatMap((x) => x.prices));
+  console.log(`商店 ${n}（${arr.length} 局）：进店金币 ${avg(arr.map((x) => x.goldIn)).toFixed(0)}，货架均价 ${avgPrice.toFixed(0)}，可买 ${(avg(arr.map((x) => x.goldIn)) / avgPrice).toFixed(2)} 个，实际买 ${avg(arr.map((x) => x.bought)).toFixed(2)} 个，剩 ${avg(arr.map((x) => x.left)).toFixed(0)}`);
+}
 console.log('\n波 | 到达局数 | 平均掉血 | 平均命中 | 平均收入');
 for (let w = 1; w <= 20; w++) {
   const rows = results.map((r) => r.log.find((l) => l.wave === w)).filter(Boolean);

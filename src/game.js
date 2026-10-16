@@ -337,6 +337,7 @@ export class Game {
       return;
     }
     this.run.rewardsTaken++;
+    if (!R.shopAfterWave(this.run)) { this.startWave(); return; }
     this.state = 'shop';
     this.shop = R.openShop(this.run);
     this.ui.shop(this.run, this.shop);

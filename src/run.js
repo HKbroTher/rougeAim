@@ -255,7 +255,8 @@ export function onHeadshotInBulletTime(run) {
 
 export function killGold(run, base, extraMul = 1) {
   const mult = multiplier(run);
-  let g = base * mult * extraMul * (1 + 0.08 * lv(run, 'fortune'));
+  const goldMult = 1 + (mult - 1) * COMBO.goldMultScale;
+  let g = base * goldMult * extraMul * (1 + 0.08 * lv(run, 'fortune'));
   if (has(run, 'greedsight') && mult >= 3) g *= 1.5;
   if (has(run, 'bloodpact')) g *= 1.4;
   const gold = Math.max(1, Math.round(g));
@@ -448,8 +449,9 @@ export function addUpgrade(run, id) {
 // ---------------- 商店 ----------------
 
 // 价格随深度平滑上涨，与每波收入增长同步
+// 第 k 家商店（每 3 波一家）价格 × k
 export function priceScale(run) {
-  return 1 + SHOP.priceGrowth * run.waveIndex;
+  return Math.max(1, run.waveIndex / SHOP.every);
 }
 
 export function healPrice(run) {
@@ -477,27 +479,32 @@ export function stardustPrice(run) {
 }
 
 export function stardustYield(run) {
-  // depth = 已通过的波数，越深兑换越多
-  const depth = run.waveIndex;
-  const y = SHOP.stardustYieldBase + SHOP.stardustYieldPerDepth * depth;
+  // 兑换量随商店深度增长得比价格快，越深越划算
+  const k = priceScale(run);
+  const y = SHOP.stardustYieldBase * k * (1 + SHOP.stardustDepthBonus * (k - 1));
   return Math.round(y * (has(run, 'starmap') ? 1.3 : 1));
 }
 
+// 商店货架：3 个强化（流派 60% / 基础 25% / 通用 15%，每格有概率换成核心），第 3 格可能换成经济强化
 function rollShopItems(run) {
   const ids = [];
-  for (let i = 0; i < SHOP.schoolSlots; i++) {
+  for (let i = 0; i < SHOP.slots; i++) {
     let id = null;
-    if (Math.random() < SHOP.coreInShop) id = rollKind(run, 'core', ids);
-    if (!id) id = rollKind(run, Math.random() < 0.85 ? 'school' : 'general', ids) || rollKind(run, 'general', ids);
+    if (i === SHOP.slots - 1 && Math.random() < SHOP.econChance) id = pickOne(poolOf(run, (u) => u.cat === 'econ'));
+    if (!id && Math.random() < SHOP.coreInShop) id = rollKind(run, 'core', ids);
+    if (!id) {
+      const r = Math.random();
+      const kind = r < 0.6 ? 'school' : r < 0.85 ? 'base' : 'general';
+      id = rollKind(run, kind, ids) || rollKind(run, 'school', ids) || rollKind(run, 'base', ids);
+    }
     if (id) ids.push(id);
   }
-  const base = rollKind(run, 'base', ids);
-  if (base) ids.push(base);
-  if (Math.random() < SHOP.econChance) {
-    const econ = pickOne(poolOf(run, (u) => u.cat === 'econ'));
-    if (econ) ids.push(econ);
-  }
   return ids;
+}
+
+// 这一波打完之后有没有商店
+export function shopAfterWave(run) {
+  return run.waveIndex % SHOP.every === 0;
 }
 
 export function openShop(run) {
