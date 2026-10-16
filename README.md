@@ -34,6 +34,21 @@ python3 -m http.server 8000
 | 右键 / E / 空格 | 释放「专注」：4 秒子弹时间，敌人减速到 30%，你的转身、射速、换弹不受影响 |
 | Esc | 暂停 |
 
+## 灵敏度：直接沿用 CS2 / Valorant 的设置
+
+本游戏底层和 CS2 同一标准（每个鼠标 count 转 0.022° × 灵敏度），所以**本游戏灵敏度 = CS2 灵敏度**。
+在「设置」里选按哪个游戏填：
+
+| 来源 | 换算 |
+| --- | --- |
+| CS2 | 原样填写 |
+| Valorant | 自动 × 3.1818（0.07 ÷ 0.022） |
+| cm/360 | 直接填转一圈的厘米数，需要填 DPI |
+
+填 DPI 后会实时显示 cm/360、CS2 / Valorant 等效灵敏度和 eDPI。FOV 有「匹配 CS2（垂直 73.74°）」「匹配 Valorant（70.53°）」两个预设。
+Chrome / Edge 下默认开启原始输入；要和原游戏完全一致，Windows 指针速度保持第 6 格并关闭「提高指针精确度」。
+旧存档的灵敏度会自动换算，手感不变。换算公式和测试见 `src/sens.js`、`tools/sens-tests.mjs`。
+
 ## 第一版原型包含
 
 - 第一人称、Pointer Lock、射线命中判定，爆头 ×2 伤害并额外 +1 连杀
@@ -84,6 +99,8 @@ src/ui.js       HUD 与所有界面
 tools/smoke.mjs 冒烟测试：自动跑完整一局
 tools/balance.mjs 平衡测试：模拟真人瞄准跑多局并统计（可指定流派）
 tools/upgrade-tests.mjs 强化机制测试：逐个检查关键强化的效果
+tools/sens-tests.mjs 灵敏度换算测试（node tools/sens-tests.mjs，不需要浏览器）
+src/sens.js     灵敏度 / FOV 换算
 src/simaim.js   模拟真人瞄准（仅调试）
 tools/build-single.mjs 打包成单文件 dist/rogueaim.html
 vendor/         three.js r169（MIT）
