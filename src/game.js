@@ -34,6 +34,8 @@ export class Game {
     this.raycaster.far = WEAPON.range;
     this.center = new THREE.Vector2(0, 0);
     this.frustum = new THREE.Frustum();
+    this.tmpFwd = new THREE.Vector3();
+    this.tmpV = new THREE.Vector3();
     this.projM = new THREE.Matrix4();
     this.titleTab = 'play';
     this.timeScale = 1;
@@ -286,11 +288,17 @@ export class Game {
     const center = this.yaw;
     const arc = (def.arc * Math.PI) / 180;
     let t = 1.6; // 开场准备时间
-    this.spawnQueue = types.map((type) => {
-      const item = { type, at: t, angle: center + Math.PI + (Math.random() - 0.5) * arc };
+    const pincer = (def.mobility && def.mobility.pincer) || 0;
+    this.spawnQueue = [];
+    for (let i = 0; i < types.length; i++) {
+      const angle = center + Math.PI + (Math.random() - 0.5) * arc;
+      this.spawnQueue.push({ type: types[i], at: t, angle });
+      // 夹击：下一个敌人同时出现在正对面（360° 波次才有）
+      if (def.arc >= 360 && i + 1 < types.length && Math.random() < pincer) {
+        this.spawnQueue.push({ type: types[++i], at: t, angle: angle + Math.PI });
+      }
       t += def.interval * (0.6 + Math.random() * 0.8);
-      return item;
-    });
+    }
     this.waveTime = 0;
     this.waveDef = def;
     this.state = 'combat';
@@ -462,8 +470,16 @@ export class Game {
     this.projM.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.projM);
 
+    // 闪避兵需要知道准星离它多近
+    const fwd = this.camera.getWorldDirection(this.tmpFwd);
+    const eye = this.camera.position;
     for (const bot of this.bots) {
       if (bot.dead) continue;
+      if (bot.move.mode === 'dodge') {
+        const p = bot.position;
+        this.tmpV.set(p.x - eye.x, p.y + bot.bodyH * 0.7 - eye.y, p.z - eye.z).normalize();
+        bot.aimAngle = Math.acos(Math.min(1, fwd.dot(this.tmpV)));
+      }
       const visible = this.frustum.containsPoint(bot.headWorld);
       if (visible && bot.seenAt == null) bot.seenAt = this.time;
       if (!visible) bot.offscreenAt = this.time;
@@ -677,6 +693,9 @@ export class Game {
     const rel = -(ang - this.yaw - Math.PI);
     bot.remove();
     const res = R.takeDamage(run, Math.round(bot.def.damage * (this.waveDef.damageMul || 1)));
+    // 平衡分析用：记录被哪种 bot / 机动碰到
+    const key = `${bot.type}:${bot.move.mode}`;
+    (run.stats.hurtBy ||= {})[key] = (run.stats.hurtBy[key] || 0) + 1;
     if (res.absorbed) { sfx.shield(); this.floatCenter('护盾抵挡', 'info'); }
     else { sfx.hurt(); this.ui.hurt(rel); }
     if (R.has(run, 'recoilarmor')) {

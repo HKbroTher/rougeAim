@@ -65,6 +65,7 @@ async function playOne(i) {
     return {
       waves: s.waves, victory: s.victory, acc: s.accuracy, hs: s.hsRate, moverAcc: s.moverAcc,
       maxCombo: s.maxCombo, stardust: s.stardust, reloads: r.stats.reloads,
+      hurtBy: r.stats.hurtBy || {},
       ups: Object.entries(r.ups).map(([id, l]) => (l > 1 ? `${id}${l}` : id)).join(' '),
       log: r.waveLog.map((w) => ({
         wave: w.wave,
@@ -99,6 +100,10 @@ for (const r of results) console.log(`  强化：${r.ups}`);
 console.log(`死亡波次：${waves.map((w) => (w > 20 ? '通关' : w)).join(', ')}（平均 ${avg(waves).toFixed(1)}）`);
 console.log(`命中率 ${pct(avg(results.map((r) => r.acc)))}，爆头率 ${pct(avg(results.map((r) => r.hs)))}，移动目标命中率 ${pct(avg(results.map((r) => r.moverAcc).filter((v) => v != null)))}`);
 console.log(`平均最高连杀 ${avg(results.map((r) => r.maxCombo)).toFixed(0)}，平均星尘 ${avg(results.map((r) => r.stardust)).toFixed(0)}`);
+const hurt = {};
+for (const r of results) for (const [k, v] of Object.entries(r.hurtBy)) hurt[k] = (hurt[k] || 0) + v;
+const hurtTotal = Object.values(hurt).reduce((a, b) => a + b, 0) || 1;
+console.log(`被碰到的来源（共 ${hurtTotal} 次）：${Object.entries(hurt).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${Math.round((v / hurtTotal) * 100)}%`).join('，')}`);
 console.log('\n波 | 到达局数 | 平均掉血 | 平均命中 | 平均收入');
 for (let w = 1; w <= 20; w++) {
   const rows = results.map((r) => r.log.find((l) => l.wave === w)).filter(Boolean);

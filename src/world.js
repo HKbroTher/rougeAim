@@ -20,9 +20,10 @@ export function createWorld(canvas) {
   sun.position.set(10, 20, 6);
   scene.add(sun);
 
-  // 地面 + 网格，提供运动参照
+  // 地面 + 网格，提供运动参照。
+  // 地面要细分：一整个大三角扇穿过相机下方时，部分渲染器的深度插值会出错，把站在地上的 bot 下半身挡住。
   const floor = new THREE.Mesh(
-    new THREE.CircleGeometry(80, 64),
+    new THREE.PlaneGeometry(160, 160, 40, 40),
     new THREE.MeshStandardMaterial({ color: 0x151a2a, roughness: 0.95 }),
   );
   floor.rotation.x = -Math.PI / 2;
