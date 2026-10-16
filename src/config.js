@@ -71,25 +71,27 @@ export const THREAT = {
 export const WAVE_COUNT = 20;
 
 export const WAVE_CURVE = {
+  // 目标：高手一般死在第 12 波左右，只有非常强的发挥才能通关（模拟测试见 docs/DESIGN.md §2.7）
   countBase: 10,         // 第 1 波敌人数
-  countLinear: 1.6,      // 每波线性增加
-  countQuad: 0.03,       // 二次项，让后期密度略微加速上升
-  intervalBase: 1.1,     // 第 1 波平均出怪间隔（秒）
-  intervalDecay: 0.95,   // 每波乘以该系数
-  intervalMin: 0.5,      // 加入机动后，后期出怪密度上限放宽（原 0.35）
-  speedPerWave: 0.015,   // 每波敌人速度 +1.5%（第 20 波 1.29x）
+  countLinear: 2.0,      // 每波线性增加
+  countQuad: 0.05,       // 二次项，让后期密度加速上升
+  intervalBase: 1.0,     // 第 1 波平均出怪间隔（秒）
+  intervalDecay: 0.93,   // 每波乘以该系数
+  intervalMin: 0.3,
+  speedPerWave: 0.02,    // 每波敌人速度 +2%
+  damagePerWave: 0.04,   // 每波碰撞伤害 +4%（第 12 波 1.44x），让后期每一次失误都更痛
   arcBase: 120,          // 第 1 波出怪扇区（度）
   arcPerWave: 40,        // 每波扩大，第 7 波起 360°
-  chargerFrom: 2, chargerPerWave: 0.035, chargerMax: 0.38,
-  heavyFrom: 3, heavyPerWave: 0.012, heavyMax: 0.2,
+  chargerFrom: 2, chargerPerWave: 0.04, chargerMax: 0.4,
+  heavyFrom: 3, heavyPerWave: 0.015, heavyMax: 0.22,
   // 机动：从第 moveFrom 波开始，一部分普通兵 / 冲锋兵带横向或垂直机动，比例和幅度逐波上升。
   // 重甲兵永远直线（它练的是跟枪，不是预判）。
   moveFrom: 4,
-  moverShareBase: 0.15, moverSharePerWave: 0.04, moverShareMax: 0.65,
-  ampBase: 0.8, ampPerWave: 0.1, ampMax: 2.5,          // 横向幅度（米）
-  freqBase: 0.35, freqPerWave: 0.02, freqMax: 0.7,     // 横移频率（Hz）
+  moverShareBase: 0.15, moverSharePerWave: 0.045, moverShareMax: 0.7,
+  ampBase: 0.9, ampPerWave: 0.11, ampMax: 2.5,         // 横向幅度（米）
+  freqBase: 0.38, freqPerWave: 0.022, freqMax: 0.75,   // 横移频率（Hz）
   jumpFrom: 6,
-  adadFrom: 9,
+  adadFrom: 8,
   adadSpeedBase: 2.2, adadSpeedPerWave: 0.1, adadSpeedMax: 3.4, // ADAD 横移速度（m/s）
 };
 
@@ -131,6 +133,7 @@ function makeWave(n) {
     interval: Math.max(c.intervalMin, c.intervalBase * c.intervalDecay ** k),
     arc: Math.min(360, c.arcBase + c.arcPerWave * k),
     speedMul: 1 + c.speedPerWave * k,
+    damageMul: 1 + c.damagePerWave * k,
   };
 }
 
@@ -158,7 +161,7 @@ export const SHOP = {
   healBasePrice: 25,
   healPriceStep: 15,
   // 强化：按类别定价；基础强化每升一级 +baseStep
-  upgradePrice: { base: 30, baseStep: 15, school: 55, general: 50, econ: 45, core: 95 },
+  upgradePrice: { base: 40, baseStep: 20, school: 70, general: 60, econ: 50, core: 120 },
   schoolSlots: 2,        // 流派 / 通用货架数
   coreInShop: 0.08,      // 流派货架换成核心的概率
   econChance: 0.3,       // 出现经济货架的概率
@@ -207,9 +210,9 @@ export const KEEPSAKES = [
   { id: 'hunter', school: 'head', icon: '🎯', name: '猎手徽章', costs: [0, 200, 300],
     levels: ['爆头额外 +1 连杀', '第一次三选一保底 1 个爆头流强化', '开局额外一次「爆头流三选一」'] },
   { id: 'drum', school: 'spray', icon: '🥁', name: '旧弹鼓', costs: [0, 200, 300],
-    levels: ['弹匣 +4', '第一次三选一保底 1 个扫射流强化', '开局额外一次「扫射流三选一」'] },
+    levels: ['弹匣 +3', '第一次三选一保底 1 个扫射流强化', '开局额外一次「扫射流三选一」'] },
   { id: 'watch', school: 'time', icon: '⌚', name: '怀表', costs: [0, 200, 300],
-    levels: ['每波开始专注 +50%', '第一次三选一保底 1 个子弹时间流强化', '开局额外一次「子弹时间流三选一」'] },
+    levels: ['每波开始专注 +30%', '第一次三选一保底 1 个子弹时间流强化', '开局额外一次「子弹时间流三选一」'] },
   { id: 'prism', school: null, icon: '🔺', name: '三棱镜', costs: [250],
     levels: ['三选一的三个选项必定来自三个不同类别（爆头 / 扫射 / 子弹时间 / 基础），不受流派倾向影响'] },
   { id: 'blank', school: null, icon: '⬜', name: '空白徽章', costs: [200],

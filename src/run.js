@@ -61,21 +61,21 @@ export function multiplier(run) {
 // ---------------- 武器 ----------------
 
 export function fireInterval(run, base) {
-  let rate = (1 + 0.12 * run.chainStacks) * (1 + 0.08 * lv(run, 'trigger'));
-  if (has(run, 'rapid')) rate *= 1.15;
-  if (inBulletTime(run) && has(run, 'overclock')) rate *= 1.3;
+  let rate = (1 + 0.08 * run.chainStacks) * (1 + 0.05 * lv(run, 'trigger'));
+  if (has(run, 'rapid')) rate *= 1.1;
+  if (inBulletTime(run) && has(run, 'overclock')) rate *= 1.2;
   return base / rate;
 }
 
 export function magSize(run) {
-  let m = has(run, 'drum') ? 30 : WEAPON.magSize;
-  m += 3 * lv(run, 'mag');
-  if (keepsakeIs(run, 'drum')) m += 4;
+  let m = has(run, 'drum') ? 24 : WEAPON.magSize;
+  m += 2 * lv(run, 'mag');
+  if (keepsakeIs(run, 'drum')) m += 3;
   return m;
 }
 
 export function baseReloadTime(run) {
-  return (has(run, 'drum') ? 3.0 : WEAPON.reloadTime) * (1 - 0.12 * lv(run, 'quick'));
+  return (has(run, 'drum') ? 3.2 : WEAPON.reloadTime) * (1 - 0.08 * lv(run, 'quick'));
 }
 
 export const reloading = (run) => run.reloadLeft > 0;
@@ -131,8 +131,8 @@ export function focusMax(run) {
 }
 
 export function focusDuration(run) {
-  const bonus = has(run, 'focuslens') ? 1 : 0;
-  let d = has(run, 'stasis') ? 1.5 + bonus * 0.5 : FOCUS.duration + bonus;
+  const bonus = has(run, 'focuslens') ? 0.5 : 0;
+  let d = has(run, 'stasis') ? 1.2 + bonus * 0.5 : FOCUS.duration + bonus;
   if (has(run, 'fragment')) d *= 0.5;
   return d;
 }
@@ -144,7 +144,7 @@ export function bulletTimeScale(run) {
 
 function addFocus(run, amount) {
   if (inBulletTime(run)) return;
-  let gain = amount * (has(run, 'focuslens') ? 1.5 : 1) * (1 + 0.2 * lv(run, 'flow'));
+  let gain = amount * (has(run, 'focuslens') ? 1.3 : 1) * (1 + 0.15 * lv(run, 'flow'));
   run.focus = Math.min(focusMax(run), run.focus + gain);
 }
 
@@ -174,7 +174,7 @@ function extendBulletTime(run, sec) {
 // 子弹时间结束时调用，返回需要的后续处理
 export function endBulletTime(run) {
   const bt = run.bt || { kills: 0, hitBots: new Set() };
-  if (has(run, 'echo') && bt.kills >= 4) run.focus = Math.min(focusMax(run), focusMax(run) * 0.3);
+  if (has(run, 'echo') && bt.kills >= 4) run.focus = Math.min(focusMax(run), focusMax(run) * 0.25);
   if (has(run, 'timedebt')) run.debtTime = run.focusTotal;
   run.bt = null;
   return bt;
@@ -208,7 +208,7 @@ export function registerHit(run, headshot, { extra = false, bonusCombo = 0 } = {
   addFocus(run, headshot ? FOCUS.perHeadshot : FOCUS.perHit);
   if (extra) return;
   run.hitStreak++;
-  if (has(run, 'beltfeed') && run.hitStreak % 5 === 0) refundAmmo(run, 1);
+  if (has(run, 'beltfeed') && run.hitStreak % 6 === 0) refundAmmo(run, 1);
   if (has(run, 'overheat')) run.heat = Math.min(20, run.heat + 1);
 }
 
@@ -238,8 +238,8 @@ export function registerMiss(run) {
 export function onKillInBulletTime(run) {
   if (!inBulletTime(run) || !run.bt) return;
   run.bt.kills++;
-  if (has(run, 'afterglow') && run.bt.ext < 3) {
-    const add = Math.min(0.3, 3 - run.bt.ext);
+  if (has(run, 'afterglow') && run.bt.ext < 2) {
+    const add = Math.min(0.25, 2 - run.bt.ext);
     run.bt.ext += add;
     extendBulletTime(run, add);
   }
@@ -247,15 +247,15 @@ export function onKillInBulletTime(run) {
 }
 
 export function onHeadshotInBulletTime(run) {
-  if (!inBulletTime(run) || !run.bt || !has(run, 'timebank') || run.bt.bankExt >= 2) return;
-  const add = Math.min(0.2, 2 - run.bt.bankExt);
+  if (!inBulletTime(run) || !run.bt || !has(run, 'timebank') || run.bt.bankExt >= 1.5) return;
+  const add = Math.min(0.15, 1.5 - run.bt.bankExt);
   run.bt.bankExt += add;
   extendBulletTime(run, add);
 }
 
 export function killGold(run, base, extraMul = 1) {
   const mult = multiplier(run);
-  let g = base * mult * extraMul * (1 + 0.1 * lv(run, 'fortune'));
+  let g = base * mult * extraMul * (1 + 0.08 * lv(run, 'fortune'));
   if (has(run, 'greedsight') && mult >= 3) g *= 1.5;
   if (has(run, 'bloodpact')) g *= 1.4;
   const gold = Math.max(1, Math.round(g));
@@ -300,8 +300,9 @@ export function startWave(run) {
   run.debtTime = 0;
   run.bt = null;
   run.heat = 0;
-  run.shield += lv(run, 'guard');
-  if (keepsakeIs(run, 'watch')) run.focus = Math.min(focusMax(run), run.focus + focusMax(run) * 0.5);
+  // 护盾强化：每波开始把护盾补到等级数（不会跨波无限累积）
+  if (has(run, 'guard')) run.shield = Math.max(run.shield, lv(run, 'guard'));
+  if (keepsakeIs(run, 'watch')) run.focus = Math.min(focusMax(run), run.focus + focusMax(run) * 0.3);
 }
 
 // 清完一波
@@ -311,7 +312,7 @@ export function finishWave(run) {
   run.focusTime = 0;
   run.debtTime = 0;
   run.bt = null;
-  if (has(run, 'bandage')) run.hp = Math.min(run.maxHp, run.hp + 8 * lv(run, 'bandage'));
+  if (has(run, 'bandage')) run.hp = Math.min(run.maxHp, run.hp + 5 * lv(run, 'bandage'));
 }
 
 export function enemySpeedMul(run) {
@@ -440,7 +441,7 @@ export function addUpgrade(run, id) {
   if (!u) return;
   run.ups[id] = lv(run, id) + 1;
   if (u.cat === 'core') run.wavesSinceCore = 0;
-  if (id === 'vigor') { run.maxHp += 15; run.hp += 15; }
+  if (id === 'vigor') { run.maxHp += 10; run.hp += 10; }
   if (id === 'mag' || id === 'drum') run.ammo = magSize(run);
 }
 

@@ -42,8 +42,8 @@ const results = await page.evaluate(async () => {
 
   // ---- 扫射流 ----
   run = fresh({ drum: 1, mag: 2 });
-  check('弹鼓 + 弹匣 2 级 = 36', R.magSize(run) === 36, R.magSize(run));
-  check('弹鼓换弹 3.0 秒', Math.abs(R.baseReloadTime(run) - 3.0) < 1e-9);
+  check('弹鼓 + 弹匣 2 级 = 28', R.magSize(run) === 28, R.magSize(run));
+  check('弹鼓换弹 3.2 秒', Math.abs(R.baseReloadTime(run) - 3.2) < 1e-9);
   run = fresh({ tacreload: 1 });
   run.ammo = 6;
   check('战术换弹：剩一半手动换弹瞬间完成', R.startReload(run, true) === 'instant' && run.ammo === 10);
@@ -57,13 +57,13 @@ const results = await page.evaluate(async () => {
   run = fresh({ overheat: 1 });
   for (let i = 0; i < 25; i++) R.registerHit(run, false);
   check('过热：最多 20 层', run.heat === 20);
-  check('过热：满层伤害 ×2', g.shotDamage(dummy(), false) === 2);
+  check('过热：满层伤害 ×1.8', Math.abs(g.shotDamage(dummy(), false) - 1.8) < 1e-9);
   R.registerMiss(run);
   check('过热：打空 −5 层', run.heat === 15);
   run = fresh({ beltfeed: 1 });
   run.ammo = 3;
-  for (let i = 0; i < 5; i++) R.registerHit(run, false);
-  check('弹链：连续命中 5 次返还 1 发', run.ammo === 4, run.ammo);
+  for (let i = 0; i < 6; i++) R.registerHit(run, false);
+  check('弹链：连续命中 6 次返还 1 发', run.ammo === 4, run.ammo);
   run = fresh({ rend: 1 });
   run.track.count = 4;
   check('撕裂：第 4 次连续命中 ×3', g.shotDamage(dummy(), false) === 3);
@@ -73,7 +73,7 @@ const results = await page.evaluate(async () => {
   // ---- 子弹时间流 ----
   run = fresh({ stasis: 1 }, { focus: 20 });
   R.activateFocus(run);
-  check('时停：1.5 秒、世界静止', run.focusTime === 1.5 && R.bulletTimeScale(run) === 0);
+  check('时停：1.2 秒、世界静止', run.focusTime === 1.2 && R.bulletTimeScale(run) === 0);
   run = fresh({ timedebt: 1 }, { focus: 6 });
   check('时间债：25% 即可释放', R.canActivateFocus(run));
   R.activateFocus(run);
@@ -85,12 +85,12 @@ const results = await page.evaluate(async () => {
   run = fresh({ afterglow: 1 }, { focus: 20 });
   R.activateFocus(run);
   for (let i = 0; i < 30; i++) R.onKillInBulletTime(run);
-  check('余韵：最多延长 3 秒', Math.abs(run.focusTime - 7) < 1e-9, run.focusTime);
+  check('余韵：最多延长 2 秒', Math.abs(run.focusTime - 6) < 1e-9, run.focusTime);
   run = fresh({ echo: 1 }, { focus: 20 });
   R.activateFocus(run);
   for (let i = 0; i < 4; i++) R.onKillInBulletTime(run);
   R.endBulletTime(run);
-  check('回响：击杀 ≥4 返还 30% 专注', Math.abs(run.focus - 6) < 1e-9, run.focus);
+  check('回响：击杀 ≥4 返还 25% 专注', Math.abs(run.focus - 5) < 1e-9, run.focus);
   run = fresh({ timeslit: 1 }, { focus: 20 });
   R.activateFocus(run);
   run.ammo = 0;
@@ -98,18 +98,18 @@ const results = await page.evaluate(async () => {
   run = fresh({ overclock: 1 }, { focus: 20 });
   const before = R.fireInterval(run, 0.14);
   R.activateFocus(run);
-  check('加速世界：子弹时间射速 +30%', Math.abs(before / R.fireInterval(run, 0.14) - 1.3) < 1e-9);
+  check('加速世界：子弹时间射速 +20%', Math.abs(before / R.fireInterval(run, 0.14) - 1.2) < 1e-9);
 
   // ---- 基础强化 ----
   run = fresh({});
   const hp0 = run.maxHp;
   R.addUpgrade(run, 'vigor');
   R.addUpgrade(run, 'vigor');
-  check('体魄 2 级：生命上限 +30', run.maxHp === hp0 + 30 && run.ups.vigor === 2);
-  run = fresh({ guard: 2 });
-  const sh = run.shield;
+  check('体魄 2 级：生命上限 +20', run.maxHp === hp0 + 20 && run.ups.vigor === 2);
+  run = fresh({ guard: 2 }, { shield: 0 });
   R.startWave(run);
-  check('护盾 2 级：每波 +2 护盾', run.shield === sh + 2);
+  R.startWave(run);
+  check('护盾 2 级：每波补到 2 层，不跨波累积', run.shield === 2, run.shield);
 
   // ---- 三选一规则 ----
   run = fresh({});
