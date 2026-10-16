@@ -433,7 +433,7 @@ export class Game {
     const target = run.focusTime > 0 ? R.bulletTimeScale(run) : run.debtTime > 0 ? 1.5 : 1;
     // 惯性：退出子弹时间时用 2 秒慢慢恢复
     const recovering = target > this.worldScale && run.focusTime <= 0 && R.has(run, 'inertia');
-    const rate = recovering ? dt * (1 - FOCUS.timeScale) / 2 : dt / FOCUS.ramp;
+    const rate = recovering ? dt * (1 - FOCUS.timeScale) / 1.2 : dt / FOCUS.ramp;
     this.worldScale += Math.max(-rate, Math.min(rate, target - this.worldScale));
     const wdt = dt * this.worldScale;
     this.waveTime += wdt;
@@ -469,7 +469,7 @@ export class Game {
       if (!visible) bot.offscreenAt = this.time;
       // 压制火力：1 秒没被命中就恢复
       if (bot.suppress && this.time - bot.lastHitAt > 1) bot.suppress = 0;
-      if (bot.update(wdt, 1 - 0.1 * (bot.suppress || 0))) { this.botReachedPlayer(bot); continue; }
+      if (bot.update(wdt, 1 - 0.08 * (bot.suppress || 0))) { this.botReachedPlayer(bot); continue; }
       if (bot.burn) this.tickBurn(bot, wdt);
     }
     this.bots = this.bots.filter((b) => !b.dead);
@@ -559,7 +559,7 @@ export class Game {
     if (head) R.onHeadshotInBulletTime(run);
     if (run.bt) run.bt.hitBots.add(bot);
 
-    if (R.has(run, 'suppress')) { bot.suppress = Math.min(6, tr.count); bot.lastHitAt = this.time; }
+    if (R.has(run, 'suppress')) { bot.suppress = Math.min(5, tr.count); bot.lastHitAt = this.time; }
     if (R.has(run, 'trackshield') && !run.trackShieldUsed && tr.time >= 2) {
       run.trackShieldUsed = true;
       run.shield++;
@@ -585,7 +585,7 @@ export class Game {
     if (head) d += execBonus;
     if (calm) d *= 2;
     if (flick) d *= 3;
-    if (R.has(run, 'overheat')) d *= 1 + 0.05 * run.heat;
+    if (R.has(run, 'overheat')) d *= 1 + 0.04 * run.heat;
     if (R.has(run, 'rend') && run.track.count % 4 === 0) d *= 3;
     if (R.has(run, 'shred') && bot.type === 'heavy' && bot.hitsTaken >= 3) d += 1;
     return d;
@@ -676,7 +676,7 @@ export class Game {
     const ang = Math.atan2(p.x, p.z);
     const rel = -(ang - this.yaw - Math.PI);
     bot.remove();
-    const res = R.takeDamage(run, bot.def.damage);
+    const res = R.takeDamage(run, Math.round(bot.def.damage * (this.waveDef.damageMul || 1)));
     if (res.absorbed) { sfx.shield(); this.floatCenter('护盾抵挡', 'info'); }
     else { sfx.hurt(); this.ui.hurt(rel); }
     if (R.has(run, 'recoilarmor')) {
