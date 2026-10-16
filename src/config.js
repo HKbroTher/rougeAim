@@ -23,6 +23,7 @@ export const COMBO = {
   perHeadshotBonus: 1,     // 爆头额外增加的连杀数（总计 +2）
   multPerCombo: 0.1,       // 每层连杀 +0.1x
   maxMult: 4,              // 倍率上限
+  goldMultScale: 0.6,      // 金币倍率 = 1 + (连杀倍率 − 1) × 0.6：4.0x 连杀 = 2.8x 金币，避免高手金币爆炸
 };
 
 export const FOCUS = {
@@ -73,16 +74,16 @@ export const WAVE_COUNT = 20;
 export const WAVE_CURVE = {
   // 目标：高手一般死在第 12 波左右，只有非常强的发挥才能通关（模拟测试见 docs/DESIGN.md §2.7）
   countBase: 10,         // 第 1 波敌人数
-  countLinear: 1.6,      // 每波线性增加
-  countQuad: 0.04,       // 二次项，让后期密度加速上升
+  countLinear: 1.2,      // 每波线性增加
+  countQuad: 0.035,       // 二次项，让后期密度加速上升
   intervalBase: 1.0,     // 第 1 波平均出怪间隔（秒）
-  intervalDecay: 0.947,  // 每波乘以该系数
-  intervalMin: 0.33,
-  speedPerWave: 0.02,    // 每波敌人速度 +2%
-  damagePerWave: 0.03,   // 每波碰撞伤害 +3%（第 12 波 1.33x），让后期每一次失误都更痛
+  intervalDecay: 0.955,  // 每波乘以该系数
+  intervalMin: 0.36,
+  speedPerWave: 0.016,   // 每波敌人速度 +1.6%
+  damagePerWave: 0.02,   // 每波碰撞伤害 +2%（第 12 波 1.22x），让后期每一次失误都更痛
   arcBase: 120,          // 第 1 波出怪扇区（度）
   arcPerWave: 40,        // 每波扩大，第 7 波起 360°
-  chargerFrom: 2, chargerPerWave: 0.04, chargerMax: 0.4,
+  chargerFrom: 2, chargerPerWave: 0.03, chargerMax: 0.34,
   heavyFrom: 3, heavyPerWave: 0.015, heavyMax: 0.22,
   // 机动：从第 moveFrom 波开始，一部分普通兵 / 冲锋兵带横向或垂直机动，比例和幅度逐波上升。
   // 重甲兵永远直线（它练的是跟枪，不是预判）。
@@ -190,21 +191,20 @@ export function rollMove(wave, type) {
 export const SHOP = {
   // 回血：价格随本局购买次数上涨
   healAmount: 30,
-  healBasePrice: 25,
-  healPriceStep: 15,
+  healBasePrice: 40,
+  healPriceStep: 20,
   // 强化：按类别定价；基础强化每升一级 +baseStep
-  upgradePrice: { base: 40, baseStep: 20, school: 70, general: 60, econ: 50, core: 120 },
-  schoolSlots: 2,        // 流派 / 通用货架数
-  coreInShop: 0.08,      // 流派货架换成核心的概率
-  econChance: 0.3,       // 出现经济货架的概率
+  // 第 1 家店的价格；第 k 家店 × k（与每 3 波的收入增长同步）。目标：3 波的金币普通玩家买 2 个，高手买 2 个还有剩
+  upgradePrice: { base: 60, baseStep: 20, school: 80, general: 70, econ: 60, core: 130 },
+  every: 3,              // 每 3 波开一次商店（其余波次只有免费三选一）
+  slots: 3,              // 强化货架数（流派 / 基础 / 通用混合）
+  coreInShop: 0.1,       // 每个货架换成核心的概率
+  econChance: 0.25,      // 第 3 个货架换成经济强化的概率
   // 星尘：比同档强化贵，同一局越买越贵，越深的商店兑换越多
-  stardustBasePrice: 55,
-  stardustPriceStep: 25,
-  stardustYieldBase: 14,
-  stardustYieldPerDepth: 4, // depth = 已通过的波数
-  // 所有金币价格（含每次购买的涨价幅度）乘以 1 + priceGrowth × depth，
-  // 与每波收入的增长大致同步；星尘兑换量的增长更快，所以越深兑换比例越好。
-  priceGrowth: 0.12,
+  stardustBasePrice: 70,
+  stardustPriceStep: 30,
+  stardustYieldBase: 30,       // 第 1 家店的兑换量；第 k 家店 × k × (1 + 0.12 × (k − 1))，越深兑换比例越好
+  stardustDepthBonus: 0.12,
   // 哪些商店卖星尘（按商店序号，从 1 开始）。设为 null 表示全部商店都卖。
   stardustShops: null,
   discount: 0.8, // 「会员卡」折扣

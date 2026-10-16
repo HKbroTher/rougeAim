@@ -213,8 +213,8 @@ export class UI {
       ${this.spendBlock(s)}
       <h3>当前价格</h3>
       <div class="small">回血 ${SHOP.healBasePrice}（每买一次 +${SHOP.healPriceStep}）· 强化 基础 ${SHOP.upgradePrice.base}（每级 +${SHOP.upgradePrice.baseStep}）/ 流派 ${SHOP.upgradePrice.school} / 通用 ${SHOP.upgradePrice.general} / 经济 ${SHOP.upgradePrice.econ} / 核心 ${SHOP.upgradePrice.core} ·
-        星尘 ${SHOP.stardustBasePrice}（每买一次 +${SHOP.stardustPriceStep}，兑换量 ${SHOP.stardustYieldBase}+${SHOP.stardustYieldPerDepth}×深度）。
-        以上为第 0 层基础价，实际价格 ×(1 + ${SHOP.priceGrowth}×深度)。</div>
+        星尘 ${SHOP.stardustBasePrice}（每买一次 +${SHOP.stardustPriceStep}，兑换量 ${SHOP.stardustYieldBase}）。
+        以上为第 1 家店的价格；每 ${SHOP.every} 波开一家店，第 k 家店价格 × k。</div>
       <div style="margin-top:14px"><button class="btn danger" data-action="clearLog">清空商店日志</button></div>`;
   }
 
