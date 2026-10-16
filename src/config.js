@@ -73,13 +73,13 @@ export const WAVE_COUNT = 20;
 export const WAVE_CURVE = {
   // 目标：高手一般死在第 12 波左右，只有非常强的发挥才能通关（模拟测试见 docs/DESIGN.md §2.7）
   countBase: 10,         // 第 1 波敌人数
-  countLinear: 2.0,      // 每波线性增加
-  countQuad: 0.05,       // 二次项，让后期密度加速上升
+  countLinear: 1.6,      // 每波线性增加
+  countQuad: 0.04,       // 二次项，让后期密度加速上升
   intervalBase: 1.0,     // 第 1 波平均出怪间隔（秒）
-  intervalDecay: 0.93,   // 每波乘以该系数
-  intervalMin: 0.3,
+  intervalDecay: 0.947,  // 每波乘以该系数
+  intervalMin: 0.33,
   speedPerWave: 0.02,    // 每波敌人速度 +2%
-  damagePerWave: 0.04,   // 每波碰撞伤害 +4%（第 12 波 1.44x），让后期每一次失误都更痛
+  damagePerWave: 0.03,   // 每波碰撞伤害 +3%（第 12 波 1.33x），让后期每一次失误都更痛
   arcBase: 120,          // 第 1 波出怪扇区（度）
   arcPerWave: 40,        // 每波扩大，第 7 波起 360°
   chargerFrom: 2, chargerPerWave: 0.04, chargerMax: 0.4,
@@ -87,11 +87,20 @@ export const WAVE_CURVE = {
   // 机动：从第 moveFrom 波开始，一部分普通兵 / 冲锋兵带横向或垂直机动，比例和幅度逐波上升。
   // 重甲兵永远直线（它练的是跟枪，不是预判）。
   moveFrom: 4,
-  moverShareBase: 0.15, moverSharePerWave: 0.045, moverShareMax: 0.7,
+  moverShareBase: 0.15, moverSharePerWave: 0.05, moverShareMax: 0.8,
   ampBase: 0.9, ampPerWave: 0.11, ampMax: 2.5,         // 横向幅度（米）
   freqBase: 0.38, freqPerWave: 0.022, freqMax: 0.75,   // 横移频率（Hz）
+  // 各种机动从第几波开始出现（越往后越多种）
+  stutterFrom: 4,   // 急停冲刺
+  orbitFrom: 5,     // 环绕：会绕到身后
   jumpFrom: 6,
+  lungeFrom: 6,     // 冲锋兵扑击
+  dodgeFrom: 7,     // 闪避：被准星压住会侧闪
   adadFrom: 8,
+  doubleJumpFrom: 10,
+  orbitSpeedBase: 3.5, orbitSpeedPerWave: 0.15, orbitSpeedMax: 5.5, // 环绕切线速度（m/s）
+  // 夹击：从第 pincerFrom 波起，一部分敌人成对出现在你的正前和正后
+  pincerFrom: 6, pincerBase: 0.15, pincerPerWave: 0.02, pincerMax: 0.4,
   adadSpeedBase: 2.2, adadSpeedPerWave: 0.1, adadSpeedMax: 3.4, // ADAD 横移速度（m/s）
 };
 
@@ -99,9 +108,17 @@ export const WAVE_CURVE = {
 export const MOVEMENT = {
   convergeDistance: 8,   // 距离玩家小于该值时横向幅度线性收拢到 0
   chargerAmpMul: 0.5,    // 冲锋兵只做小幅横移
-  jump: { height: 1.3, gravity: 20, intervalMin: 1.6, intervalMax: 2.8, crouchTime: 0.25, landLag: 0.3 },
+  jump: { height: 1.3, gravity: 20, intervalMin: 1.6, intervalMax: 2.8, crouchTime: 0.25, landLag: 0.3, doubleJumpSide: 4 },
   adad: { accel: 16, holdMin: 0.35, holdMax: 0.9, flipChance: 0.8 },
-  goldBonus: { sine: 1, jump: 1, adad: 2 }, // 机动目标更难打，多给金币
+  // 闪避：准星停在它身上 aimTime 秒后，前摇 windup 秒（侧倾 + 发白），然后 dashTime 秒内侧闪 dashDist 米
+  dodge: { aimAngle: 0.07, aimTime: 0.22, windup: 0.18, dashDist: 3.2, dashTime: 0.18, cooldown: 1.4, maxDodges: 3, maxOffset: 4.5 },
+  // 环绕：切线速度 tangential m/s 绕玩家转，角速度上限 maxAngular，距离 < slowRadius 时逐渐停止环绕
+  orbit: { maxAngular: 0.9, slowRadius: 5 },
+  // 急停冲刺：走 → 停（几乎不动）→ 下蹲前摇 → 冲刺（sprintSpeed 倍速）
+  stutter: { walkMin: 0.5, walkMax: 1.2, stopMin: 0.45, stopMax: 0.8, stopSpeed: 0.1, windup: 0.18, sprint: 0.55, sprintSpeed: 2.6 },
+  // 扑击（冲锋兵）：冲到 distMin–distMax 米时停下发红光 windup 秒，然后以 speed 倍速扑过来
+  lunge: { distMin: 7, distMax: 11, windup: 0.55, speed: 2.0 },
+  goldBonus: { sine: 1, jump: 1, adad: 2, dodge: 2, orbit: 1, stutter: 1, lunge: 1 }, // 机动目标更难打，多给金币
 };
 
 function makeWave(n) {
@@ -123,6 +140,8 @@ function makeWave(n) {
     jump: n >= c.jumpFrom,
     adad: n >= c.adadFrom,
     adadSpeed: Math.min(c.adadSpeedMax, c.adadSpeedBase + c.adadSpeedPerWave * (n - c.adadFrom)),
+    orbitSpeed: Math.min(c.orbitSpeedMax, c.orbitSpeedBase + c.orbitSpeedPerWave * (n - c.orbitFrom)),
+    pincer: n < c.pincerFrom ? 0 : Math.min(c.pincerMax, c.pincerBase + c.pincerPerWave * (n - c.pincerFrom)),
   };
   return {
     n,
@@ -143,16 +162,29 @@ export const WAVES = Array.from({ length: WAVE_COUNT }, (_, i) => makeWave(i + 1
 export function rollMove(wave, type) {
   const mob = wave.mobility;
   if (!mob || type === 'heavy' || Math.random() >= mob.share) return { mode: 'none' };
+  const n = wave.n;
+  const c = WAVE_CURVE;
   const modes = [['sine', 1]];
-  if (type === 'normal' && mob.jump) modes.push(['jump', 0.7]);
-  if (type === 'normal' && mob.adad) modes.push(['adad', 0.7]);
+  if (type === 'normal') {
+    if (n >= c.stutterFrom) modes.push(['stutter', 0.8]);
+    if (n >= c.orbitFrom) modes.push(['orbit', 0.8]);
+    if (n >= c.jumpFrom) modes.push(['jump', 0.8]);
+    if (n >= c.dodgeFrom) modes.push(['dodge', 0.9]);
+    if (n >= c.adadFrom) modes.push(['adad', 0.8]);
+  } else if (type === 'charger') {
+    if (n >= c.lungeFrom) modes.push(['lunge', 1.3]);
+    if (n >= c.orbitFrom + 3) modes.push(['orbit', 0.5]);
+  }
   let r = Math.random() * modes.reduce((a, [, w]) => a + w, 0);
   let mode = modes[0][0];
   for (const [id, w] of modes) { r -= w; if (r <= 0) { mode = id; break; } }
   const ampMul = type === 'charger' ? MOVEMENT.chargerAmpMul : 1;
   if (mode === 'sine') return { mode, amp: mob.amp * ampMul, freq: mob.freq };
-  if (mode === 'jump') return { mode, amp: 0, height: MOVEMENT.jump.height };
-  return { mode, amp: mob.amp, speed: mob.adadSpeed };
+  if (mode === 'jump') return { mode, amp: 0, height: MOVEMENT.jump.height, doubleJump: n >= c.doubleJumpFrom };
+  if (mode === 'adad') return { mode, amp: mob.amp, speed: mob.adadSpeed };
+  if (mode === 'dodge') return { mode, amp: mob.amp };
+  if (mode === 'orbit') return { mode, amp: 0, tangential: mob.orbitSpeed * (type === 'charger' ? 1.3 : 1) };
+  return { mode, amp: 0 }; // stutter / lunge
 }
 
 export const SHOP = {
