@@ -81,6 +81,9 @@ button { font: inherit; }
 #heat-fill { height: 100%; width: 0; background: linear-gradient(90deg, #ffb703, #fb5607); }
 #heat.full #heat-fill { background: #ff3d00; box-shadow: 0 0 8px #ff3d00; }
 #crosshair.flick .ch { background: var(--gold); box-shadow: 0 0 6px var(--gold); }
+.sens-info .stat .v { font-size: 20px; }
+input.num { pointer-events: auto; width: 120px; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); background: #1c2440; color: var(--text); font: inherit; }
+input[type=checkbox] { pointer-events: auto; width: 18px; height: 18px; }
 #threat { position: absolute; inset: 0; width: 100%; height: 100%; }
 #reload-ring { position: absolute; left: -22px; top: -22px; width: 44px; height: 44px; border-radius: 50%; opacity: 0;
   background: conic-gradient(#fff calc(var(--p, 0) * 1turn), rgba(255,255,255,0.12) 0);

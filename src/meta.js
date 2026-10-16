@@ -1,5 +1,6 @@
 // 局外存档：星尘、工坊等级、设置、枪法档案与商店决策日志（用于调价）。
 import { META_UPGRADES, KEEPSAKES } from './config.js';
+import { migrateSettings } from './sens.js';
 
 const KEY = 'rougeaim.save.v1';
 const MAX_RUNS = 50;
@@ -10,7 +11,8 @@ function defaults() {
     upgrades: {},            // id -> level
     keepsakes: { hunter: 1, drum: 1, watch: 1 }, // 遗物 id -> 等级（三个流派遗物 1 级默认拥有）
     keepsake: null,          // 本局携带的遗物
-    settings: { sensitivity: 1.0, volume: 0.5 },
+    // 灵敏度：sensSource（cs2 / valorant / cm360）+ sensInput（该来源下的数值）；fov 为垂直视野（度）
+    settings: migrateSettings({ volume: 0.5 }),
     runs: [],                // 每局摘要（枪法档案）
     shopLog: [],             // 每次进商店的决策记录
   };
@@ -20,7 +22,9 @@ export function loadSave() {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return defaults();
-    return { ...defaults(), ...JSON.parse(raw) };
+    const save = { ...defaults(), ...JSON.parse(raw) };
+    migrateSettings(save.settings); // 旧版本的灵敏度倍率换算成 CS2 单位，手感不变
+    return save;
   } catch {
     return defaults();
   }

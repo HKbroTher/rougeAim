@@ -11,7 +11,7 @@ export function createWorld(canvas) {
   scene.background = new THREE.Color(0x0b0e17);
   scene.fog = new THREE.Fog(0x0b0e17, 30, 70);
 
-  const camera = new THREE.PerspectiveCamera(PLAYER.fov, window.innerWidth / window.innerHeight, 0.05, 200);
+  const camera = new THREE.PerspectiveCamera(74, window.innerWidth / window.innerHeight, 0.05, 200);
   camera.rotation.order = 'YXZ';
   camera.position.set(0, PLAYER.eyeHeight, 0);
 

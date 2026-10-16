@@ -5,8 +5,7 @@ export const PLAYER = {
   maxHp: 100,
   eyeHeight: 1.6,
   hitRadius: 1.1,          // bot 进入这个距离即算碰到玩家
-  baseSensitivity: 0.0022, // 每像素弧度，乘以设置里的灵敏度倍率
-  fov: 90,
+  // 灵敏度与 FOV 在设置里调整，换算见 src/sens.js（底层与 CS2 相同：0.022° / count）
 };
 
 export const WEAPON = {

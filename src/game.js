@@ -10,6 +10,7 @@ import { loadSave, persist, resetSave, buyUpgrade, buyKeepsake, selectKeepsake, 
 import { META_UPGRADES } from './config.js';
 import * as R from './run.js';
 import { SimAimer, SKILLS } from './simaim.js';
+import { gameSens, radPerCount, sensInSource } from './sens.js';
 
 const params = new URLSearchParams(location.search);
 const DEBUG = params.has('debug');
@@ -40,6 +41,8 @@ export class Game {
     this.autoAim = false; // 仅 ?debug 下用于自动化冒烟测试，正式玩法不存在
     this.yawHist = [];    // 甩枪大师：最近 0.4 秒的视角
     this.flickReady = false;
+    this.rawStatus = 'unknown'; // 原始输入：on / unsupported / unknown
+    this.applyView();
     this.bindInput(canvas);
     this.toTitle();
     this.last = performance.now();
@@ -53,7 +56,7 @@ export class Game {
     document.addEventListener('mousemove', (e) => {
       if (this.state !== 'combat') return;
       if (!this.locked() && !DEBUG) return;
-      const k = PLAYER.baseSensitivity * this.save.settings.sensitivity;
+      const k = this.radPerCount;
       this.yaw -= e.movementX * k;
       this.pitch -= e.movementY * k;
       this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch));
@@ -86,15 +89,38 @@ export class Game {
     });
   }
 
+  // 设置变化后刷新：每 count 弧度、FOV
+  applyView() {
+    const st = this.save.settings;
+    this.radPerCount = radPerCount(gameSens(st));
+    this.camera.fov = st.fov;
+    this.camera.updateProjectionMatrix();
+  }
+
   locked() {
     return document.pointerLockElement === this.world.renderer.domElement;
   }
 
   lock() {
     if (DEBUG) return;
+    const el = this.world.renderer.domElement;
+    const fail = () => { if (this.state === 'combat') this.pause(); };
     try {
-      const p = this.world.renderer.domElement.requestPointerLock();
-      if (p && p.catch) p.catch(() => { if (this.state === 'combat') this.pause(); });
+      if (!this.save.settings.rawInput) {
+        const p = el.requestPointerLock();
+        if (p && p.catch) p.catch(fail);
+        return;
+      }
+      // 原始输入：绕过系统的指针速度和加速（Chrome / Edge 支持）
+      const p = el.requestPointerLock({ unadjustedMovement: true });
+      if (!p || !p.then) { this.rawStatus = 'unknown'; return; }
+      p.then(() => { this.rawStatus = 'on'; }).catch((e) => {
+        if (e && e.name === 'NotSupportedError') {
+          this.rawStatus = 'unsupported';
+          const q = el.requestPointerLock();
+          if (q && q.catch) q.catch(fail);
+        } else fail();
+      });
     } catch { /* 浏览器拒绝时玩家可再次点击 */ }
   }
 
@@ -109,38 +135,61 @@ export class Game {
     switch (action) {
       case 'tab':
         this.titleTab = data.tab;
-        this.ui.title(this.save, this.titleTab);
+        this.ui.title(this.save, this.titleTab, this.rawStatus);
         break;
       case 'start':
         this.startRun();
         break;
       case 'upgrade':
         if (buyUpgrade(this.save, data.id)) sfx.buy(); else sfx.deny();
-        this.ui.title(this.save, this.titleTab);
+        this.ui.title(this.save, this.titleTab, this.rawStatus);
         break;
       case 'buyKeepsake':
         if (buyKeepsake(this.save, data.id)) sfx.buy(); else sfx.deny();
-        this.ui.title(this.save, this.titleTab);
+        this.ui.title(this.save, this.titleTab, this.rawStatus);
         break;
       case 'keepsake':
         selectKeepsake(this.save, data.id || null);
-        this.ui.title(this.save, this.titleTab);
+        this.ui.title(this.save, this.titleTab, this.rawStatus);
         break;
       case 'setting': {
-        const v = Number(data.value);
-        this.save.settings[data.key] = v;
+        const st = this.save.settings;
+        const v = data.key === 'rawInput' ? !!data.value : Number(data.value);
+        if (typeof v === 'number' && !Number.isFinite(v)) break;
+        // 正在输入时可能出现空值或 0，先不生效，避免视角转不动
+        if ((data.key === 'sensInput' || data.key === 'dpi') && !(v > 0)) break;
+        st[data.key] = v;
         persist(this.save);
+        this.applyView();
         if (data.key === 'volume') { setVolume(v); document.getElementById('vol-val').textContent = `${Math.round(v * 100)}%`; }
-        if (data.key === 'sensitivity') document.getElementById('sens-val').textContent = v.toFixed(2);
+        if (data.key === 'fov') document.getElementById('fov-val').textContent = `${v.toFixed(1)}°`;
+        this.ui.refreshSensInfo(this.save, this.rawStatus);
         break;
       }
+      case 'sensSource': {
+        // 切换来源时把当前手感换算过去，保持转速不变
+        const st = this.save.settings;
+        const sens = gameSens(st);
+        st.sensSource = data.id;
+        st.sensInput = sensInSource(data.id, sens, st.dpi);
+        persist(this.save);
+        this.applyView();
+        this.ui.title(this.save, this.titleTab, this.rawStatus);
+        break;
+      }
+      case 'fovPreset':
+        this.save.settings.fov = Number(data.value);
+        persist(this.save);
+        this.applyView();
+        this.ui.title(this.save, this.titleTab, this.rawStatus);
+        break;
       case 'resetSave':
-        if (confirm('确定清空全部存档？')) { this.save = resetSave(); this.ui.title(this.save, this.titleTab); }
+        if (confirm('确定清空全部存档？')) { this.save = resetSave(); this.applyView(); this.ui.title(this.save, this.titleTab, this.rawStatus); }
         break;
       case 'clearLog':
         this.save.shopLog = [];
         persist(this.save);
-        this.ui.title(this.save, this.titleTab);
+        this.ui.title(this.save, this.titleTab, this.rawStatus);
         break;
       case 'pick':
         R.addUpgrade(this.run, data.id);
@@ -192,7 +241,7 @@ export class Game {
     this.unlock();
     this.clearBots();
     this.ui.showHud(false);
-    this.ui.title(this.save, this.titleTab);
+    this.ui.title(this.save, this.titleTab, this.rawStatus);
   }
 
   startRun() {

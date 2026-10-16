@@ -3,6 +3,7 @@ import { UPGRADES, SCHOOLS, CAT_LABEL, BASE_MAX_LEVEL } from './upgrades.js';
 import { META_UPGRADES, KEEPSAKES, BOTS, WAVES, FOCUS, SHOP, SETTLEMENT, WEAPON } from './config.js';
 import { upgradeLevel, nextUpgradeCost, keepsakeLevel, nextKeepsakeCost, shopStats } from './meta.js';
 import * as R from './run.js';
+import { gameSens, cm360, equivalents, GAME_YAW, FOV_PRESETS } from './sens.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -19,7 +20,8 @@ export class UI {
       if (el && !el.disabled) onAction(el.dataset.action, el.dataset);
     });
     this.screen.addEventListener('input', (e) => {
-      if (e.target.dataset.setting) onAction('setting', { key: e.target.dataset.setting, value: e.target.value });
+      const t = e.target;
+      if (t.dataset.setting) onAction('setting', { key: t.dataset.setting, value: t.type === 'checkbox' ? t.checked : t.value });
     });
     this.lastMultClass = '';
   }
@@ -76,7 +78,8 @@ export class UI {
 
   // ---------------- 标题 / 局外 ----------------
 
-  title(save, tab = 'play') {
+  title(save, tab = 'play', rawStatus = 'unknown') {
+    this.rawStatus = rawStatus;
     const tabs = [
       ['play', '开始'], ['workshop', '星尘工坊'], ['profile', '枪法档案'], ['tuning', '调参数据'], ['settings', '设置'],
     ];
@@ -241,13 +244,63 @@ export class UI {
 
   titleSettings(save) {
     const st = save.settings;
+    const src = st.sensSource;
+    const srcBtn = (id, label) => `<button class="tab ${src === id ? 'on' : ''}" data-action="sensSource" data-id="${id}">${label}</button>`;
+    const inputLabel = { cs2: 'CS2 灵敏度', valorant: 'Valorant 灵敏度', cm360: 'cm/360（厘米）' }[src];
+    const fovBtn = (k) => `<button class="tab ${Math.abs(st.fov - FOV_PRESETS[k].vfov) < 0.05 ? 'on' : ''}" data-action="fovPreset" data-value="${FOV_PRESETS[k].vfov}">匹配 ${FOV_PRESETS[k].name}（${FOV_PRESETS[k].vfov}°）</button>`;
     return `
-      <div style="display:grid;gap:14px;margin-top:8px">
-        <label class="row"><span style="width:90px">灵敏度</span><input type="range" min="0.2" max="3" step="0.05" value="${st.sensitivity}" data-setting="sensitivity" /><b id="sens-val">${Number(st.sensitivity).toFixed(2)}</b></label>
-        <label class="row"><span style="width:90px">音量</span><input type="range" min="0" max="1" step="0.05" value="${st.volume}" data-setting="volume" /><b id="vol-val">${Math.round(st.volume * 100)}%</b></label>
+      <h3>灵敏度</h3>
+      <div class="row" style="gap:6px"><span class="small dim" style="width:90px">按哪个游戏填</span>${srcBtn('cs2', 'CS2')}${srcBtn('valorant', 'Valorant')}${srcBtn('cm360', 'cm/360')}</div>
+      <div style="display:grid;gap:12px;margin-top:12px">
+        <label class="row"><span style="width:130px">${inputLabel}</span><input class="num" type="number" min="0" step="${src === 'cm360' ? 0.5 : 0.001}" value="${st.sensInput}" data-setting="sensInput" /></label>
+        <label class="row"><span style="width:130px">鼠标 DPI</span><input class="num" type="number" min="50" step="50" value="${st.dpi}" data-setting="dpi" />
+          <span class="small dim">${src === 'cm360' ? 'cm/360 模式下 DPI 会影响实际转速' : '只用于计算 cm/360，不影响实际转速'}</span></label>
       </div>
+      <div id="sens-info" class="sens-info">${this.sensInfo(save)}</div>
+      <h3>视野（FOV）</h3>
+      <div class="row" style="gap:6px">${fovBtn('cs2')}${fovBtn('valorant')}</div>
+      <label class="row" style="margin-top:10px"><span style="width:130px">垂直 FOV</span><input type="range" min="55" max="100" step="0.5" value="${st.fov}" data-setting="fov" /><b id="fov-val">${Number(st.fov).toFixed(1)}°</b></label>
+      <p class="small dim">灵敏度匹配的是转一圈的距离；FOV 决定目标在屏幕上的大小和移动速度。两者都和原游戏一致，手感才接近。</p>
+      <h3>输入</h3>
+      <label class="row"><input type="checkbox" ${st.rawInput ? 'checked' : ''} data-setting="rawInput" /><span>原始输入（绕过系统指针速度和加速，Chrome / Edge 支持）</span></label>
+      <div class="small dim" id="raw-status" style="margin-top:4px">${this.rawStatusText(st)}</div>
+      <p class="small dim">要和 CS2 / Valorant 完全一致：Windows 指针速度保持默认第 6 格，关闭「提高指针精确度」，显示缩放尽量用 100%。</p>
+      <h3>声音</h3>
+      <label class="row"><span style="width:130px">音量</span><input type="range" min="0" max="1" step="0.05" value="${st.volume}" data-setting="volume" /><b id="vol-val">${Math.round(st.volume * 100)}%</b></label>
       <h3>存档</h3>
       <button class="btn danger" data-action="resetSave">清空全部存档（星尘、工坊、档案）</button>`;
+  }
+
+  sensInfo(save) {
+    const st = save.settings;
+    const sens = gameSens(st);
+    if (!(sens > 0)) return '<span style="color:var(--danger)">请输入大于 0 的数值</span>';
+    const eq = equivalents(sens);
+    const cm = cm360(sens, st.dpi);
+    return `<div class="stat-grid" style="margin:10px 0 0">
+        ${this.statCard('cm/360', `${cm.toFixed(1)} cm`)}
+        ${this.statCard('CS2 等效', eq.cs2.toFixed(3))}
+        ${this.statCard('Valorant 等效', eq.valorant.toFixed(3))}
+        ${this.statCard('eDPI（CS2）', Math.round(eq.cs2 * st.dpi))}
+      </div>
+      <div class="small dim">每个鼠标 count 转 ${(GAME_YAW * sens).toFixed(4)}°（本游戏与 CS2 同一标准：0.022° × 灵敏度）。</div>`;
+  }
+
+  rawStatusText(st) {
+    if (!st.rawInput) return '已关闭：使用系统处理后的鼠标移动。';
+    return {
+      on: '✓ 上次锁定鼠标时原始输入已生效。',
+      unsupported: '⚠ 当前浏览器不支持原始输入，已退回普通模式，请按下方说明调整系统设置。',
+      unknown: '开始游戏、锁定鼠标后会尝试启用。',
+    }[this.rawStatus || 'unknown'];
+  }
+
+  refreshSensInfo(save, rawStatus) {
+    this.rawStatus = rawStatus;
+    const el = $('sens-info');
+    if (el) el.innerHTML = this.sensInfo(save);
+    const raw = $('raw-status');
+    if (raw) raw.textContent = this.rawStatusText(save.settings);
   }
 
   statCard(k, v, extra = '') {
