@@ -289,13 +289,13 @@ export const SETTLEMENT = {
 
 // ---------------- 命盘（参考 Hades 2 的塔罗牌） ----------------
 // 5×5 共 25 张卡。星尘解锁卡牌；每张卡有心力消耗，装备的卡总消耗不能超过心力上限。
-// 21 张普通卡总消耗 52，心力最高只有 24：满级也只能装不到一半，构筑来自取舍。
+// 21 张普通卡总消耗 52，心力最高 30：满心力也只能装一半多一点，构筑来自取舍。
 // 每张卡可以升 3 次（1–4 级），升级只加强效果、不增加消耗；第 4 级需要 1 个星核。
 // 觉醒卡消耗 0，不能手动装备。两条路任选其一即觉醒：① 上下左右相邻的普通卡全部装备；② 各自的特殊条件（有的看命盘形状，有的在局内达成）。
 // 解锁卡牌本身（不需要装备）就会把对应的局内强化加入奖池（unlocks）。
 export const DECK_SIZE = 5;
 export const CARD_MAX_LV = 4;
-export const DECK_CAPACITY = { base: 10, step: 2, costs: [60, 100, 140, 180, 230, 280, 340] }; // 10 → 24
+export const DECK_CAPACITY = { base: 10, step: 2, costs: [60, 100, 140, 180, 230, 280, 340, 400, 470, 550] }; // 10 → 30
 
 // 升级价格：第 2 / 3 / 4 级，按卡牌消耗定价；第 4 级额外要 1 个星核
 export function cardUpgradeCost(card, toLv) {
@@ -316,46 +316,46 @@ export const CARD_CATS = {
 const pct = (v) => `${v}%`;
 export const CARDS = [
   // 第 1 行
-  { id: 'h_aim', pos: [0, 0], cat: 'head', icon: '⌖', name: '准星校准', cost: 1, unlock: 0, vals: [0.5, 0.75, 1, 1.25], desc: '爆头伤害 +{v}。' },
-  { id: 'h_pierce', pos: [0, 1], cat: 'head', icon: '⇶', name: '处刑人', cost: 2, unlock: 120, unlocks: ['pierce'], vals: [50, 70, 90, 120], fmt: pct,
-    desc: '三选一中爆头流强化的出现权重 +{v}。', unlockText: '解锁即让核心「穿颅弹」进入奖池' },
-  { id: 'w_full', pos: [0, 2], cat: 'wake', icon: '◉', name: '满盘', cost: 0, unlock: 90, coresToUnlock: 1, wake: 'full', vals: [2, 4, 6, 8],
+  { id: 'h_aim', pos: [0, 0], cat: 'head', icon: '⌖', name: '准星校准', cost: 1, unlock: 0, vals: [1, 1.5, 2, 3], desc: '爆头伤害 +{v}。' },
+  { id: 'h_pierce', pos: [0, 1], cat: 'head', icon: '⇶', name: '处刑人', cost: 2, unlock: 120, unlocks: ['pierce'], vals: [10, 15, 20, 30], fmt: pct,
+    desc: '爆头伤害 +{v}；三选一中爆头流强化的出现权重 +60%。', unlockText: '解锁即让核心「穿颅弹」进入奖池' },
+  { id: 'w_full', pos: [0, 2], cat: 'wake', icon: '◉', name: '满盘', cost: 0, unlock: 90, coresToUnlock: 1, wake: 'full', vals: [4, 8, 12, 16],
     desc: '每波开始护盾补到 1 层，并回复 {v} 生命。', needText: '装备的总消耗恰好等于心力上限（一点不剩）' },
-  { id: 's_heat', pos: [0, 3], cat: 'spray', icon: '♨', name: '熔炉', cost: 2, unlock: 120, unlocks: ['overheat'], vals: [50, 70, 90, 120], fmt: pct,
-    desc: '三选一中扫射流强化的出现权重 +{v}。', unlockText: '解锁即让核心「过热枪管」及其配套进入奖池' },
-  { id: 's_mag', pos: [0, 4], cat: 'spray', icon: '▥', name: '扩容', cost: 1, unlock: 0, vals: [2, 3, 4, 5], desc: '弹匣 +{v}。' },
+  { id: 's_heat', pos: [0, 3], cat: 'spray', icon: '♨', name: '熔炉', cost: 2, unlock: 120, unlocks: ['overheat'], vals: [8, 12, 16, 22], fmt: pct,
+    desc: '射速 +{v}；三选一中扫射流强化的出现权重 +60%。', unlockText: '解锁即让核心「过热枪管」及其配套进入奖池' },
+  { id: 's_mag', pos: [0, 4], cat: 'spray', icon: '▥', name: '扩容', cost: 1, unlock: 0, vals: [3, 5, 7, 10], desc: '弹匣 +{v}。' },
   // 第 2 行
-  { id: 'h_badge', pos: [1, 0], cat: 'head', icon: '🎯', name: '猎手徽记', cost: 4, unlock: 180, opening: true, vals: [3, 4, 5, 6], desc: '开局额外一次「爆头流 {v} 选一」。' },
-  { id: 'v_body', pos: [1, 1], cat: 'tol', icon: '♥', name: '强健体魄', cost: 1, unlock: 0, vals: [15, 20, 25, 30], desc: '生命上限 +{v}。' },
-  { id: 'v_shield', pos: [1, 2], cat: 'tol', icon: '◈', name: '护盾发生器', cost: 2, unlock: 70, vals: [1, 2, 2, 3], desc: '开局获得 {v} 层护盾。' },
-  { id: 'v_aid', pos: [1, 3], cat: 'tol', icon: '✚', name: '战地急救', cost: 2, unlock: 90, vals: [6, 8, 10, 12], desc: '每波结束回复 {v} 生命。' },
-  { id: 's_badge', pos: [1, 4], cat: 'spray', icon: '🥁', name: '弹药大师', cost: 4, unlock: 180, opening: true, vals: [3, 4, 5, 6], desc: '开局额外一次「扫射流 {v} 选一」。' },
+  { id: 'h_badge', pos: [1, 0], cat: 'head', icon: '🎯', name: '猎手徽记', cost: 4, unlock: 180, opening: true, vals: [1, 2, 2, 3], desc: '开局额外 {v} 次「爆头流三选一」。' },
+  { id: 'v_body', pos: [1, 1], cat: 'tol', icon: '♥', name: '强健体魄', cost: 1, unlock: 0, vals: [30, 45, 60, 75], desc: '生命上限 +{v}。' },
+  { id: 'v_shield', pos: [1, 2], cat: 'tol', icon: '◈', name: '护盾发生器', cost: 2, unlock: 70, vals: [1, 1, 2, 2], desc: '每波开始护盾补到 {v} 层。' },
+  { id: 'v_aid', pos: [1, 3], cat: 'tol', icon: '✚', name: '战地急救', cost: 2, unlock: 90, vals: [10, 14, 18, 22], desc: '每波结束回复 {v} 生命。' },
+  { id: 's_badge', pos: [1, 4], cat: 'spray', icon: '🥁', name: '弹药大师', cost: 4, unlock: 180, opening: true, vals: [1, 2, 2, 3], desc: '开局额外 {v} 次「扫射流三选一」。' },
   // 第 3 行
-  { id: 'h_flick', pos: [2, 0], cat: 'head', icon: '↯', name: '回旋', cost: 3, unlock: 150, unlocks: ['flickmaster', 'hawkeye'], vals: [25, 40, 55, 70], fmt: pct,
+  { id: 'h_flick', pos: [2, 0], cat: 'head', icon: '↯', name: '回旋', cost: 3, unlock: 150, unlocks: ['flickmaster', 'hawkeye'], vals: [50, 75, 100, 150], fmt: pct,
     desc: '一枪击杀的目标，金币 +{v}。', unlockText: '解锁即让核心「甩枪大师」和「鹰眼弹」进入奖池' },
-  { id: 'e_stake', pos: [2, 1], cat: 'econ', icon: '●', name: '随身盘缠', cost: 1, unlock: 60, vals: [25, 40, 55, 70], desc: '开局携带 {v} 金币。' },
+  { id: 'e_stake', pos: [2, 1], cat: 'econ', icon: '●', name: '随身盘缠', cost: 1, unlock: 60, vals: [40, 70, 100, 150], desc: '开局携带 {v} 金币。' },
   { id: 'w_few', pos: [2, 2], cat: 'wake', icon: '☍', name: '独行', cost: 0, unlock: 180, coresToUnlock: 1, wake: 'few', vals: [1, 2, 2, 3],
     desc: '每打完一个区域（第 5、10、15 波），随机激活 {v} 张已解锁但没装备的卡，本局有效。', needText: '装备的卡不超过 4 张' },
-  { id: 'e_fate', pos: [2, 3], cat: 'econ', icon: '🎲', name: '命运之手', cost: 2, unlock: 90, vals: [1, 2, 2, 3], desc: '开局多 {v} 个命运骰。' },
-  { id: 's_suppress', pos: [2, 4], cat: 'spray', icon: '⊗', name: '镇压者', cost: 3, unlock: 150, unlocks: ['suppress'], vals: [12, 15, 18, 22], fmt: pct,
+  { id: 'e_fate', pos: [2, 3], cat: 'econ', icon: '🎲', name: '命运之手', cost: 2, unlock: 90, vals: [2, 3, 4, 5], desc: '开局多 {v} 个命运骰。' },
+  { id: 's_suppress', pos: [2, 4], cat: 'spray', icon: '⊗', name: '镇压者', cost: 3, unlock: 150, unlocks: ['suppress'], vals: [15, 22, 30, 40], fmt: pct,
     desc: '换弹时间 −{v}。', unlockText: '解锁即让核心「压制火力」进入奖池' },
   // 第 4 行
-  { id: 't_badge', pos: [3, 0], cat: 'time', icon: '⏳', name: '时之沙', cost: 4, unlock: 180, opening: true, vals: [3, 4, 5, 6], desc: '开局额外一次「子弹时间流 {v} 选一」。' },
-  { id: 'v_death', pos: [3, 1], cat: 'tol', icon: '✺', name: '死亡抗拒', cost: 4, unlock: 150, vals: [30, 40, 50, 60], fmt: pct,
+  { id: 't_badge', pos: [3, 0], cat: 'time', icon: '⏳', name: '时之沙', cost: 4, unlock: 180, opening: true, vals: [1, 2, 2, 3], desc: '开局额外 {v} 次「子弹时间流三选一」。' },
+  { id: 'v_death', pos: [3, 1], cat: 'tol', icon: '✺', name: '死亡抗拒', cost: 4, unlock: 150, vals: [60, 70, 85, 100], fmt: pct,
     desc: '每局一次：受到致命伤害时不会死，生命回复到 {v}。' },
-  { id: 'e_supply', pos: [3, 2], cat: 'econ', icon: '✧', name: '开局补给', cost: 3, unlock: 160, opening: true, vals: [3, 4, 5, 6], desc: '开局额外一次「{v} 选一」强化。' },
-  { id: 'v_grit', pos: [3, 3], cat: 'tol', icon: '⛨', name: '背水', cost: 4, unlock: 180, vals: [30, 35, 40, 50], fmt: pct, desc: '生命低于 40% 时，受到的伤害 −{v}。' },
-  { id: 'e_star', pos: [3, 4], cat: 'econ', icon: '✦', name: '观星者', cost: 3, unlock: 120, unlocks: ['starmap', 'bloodpact'], vals: [20, 30, 40, 50], fmt: pct,
+  { id: 'e_supply', pos: [3, 2], cat: 'econ', icon: '✧', name: '开局补给', cost: 3, unlock: 160, opening: true, vals: [1, 2, 2, 3], desc: '开局额外 {v} 次强化三选一。' },
+  { id: 'v_grit', pos: [3, 3], cat: 'tol', icon: '⛨', name: '背水', cost: 4, unlock: 180, vals: [18, 22, 26, 30], fmt: pct, desc: '受到的伤害 −{v}；生命低于 40% 时效果翻倍。' },
+  { id: 'e_star', pos: [3, 4], cat: 'econ', icon: '✦', name: '观星者', cost: 3, unlock: 120, unlocks: ['starmap', 'bloodpact'], vals: [30, 45, 60, 80], fmt: pct,
     desc: '商店星尘兑换量 +{v}。', unlockText: '解锁即让「星图」「血色契约」进入奖池' },
   // 第 5 行
-  { id: 't_flow', pos: [4, 0], cat: 'time', icon: '◑', name: '冥想', cost: 1, unlock: 0, vals: [15, 20, 25, 30], fmt: pct, desc: '专注充能 +{v}。' },
-  { id: 't_stasis', pos: [4, 1], cat: 'time', icon: '⏸', name: '凝固之钟', cost: 2, unlock: 120, unlocks: ['stasis'], vals: [50, 70, 90, 120], fmt: pct,
-    desc: '三选一中子弹时间流强化的出现权重 +{v}。', unlockText: '解锁即让核心「时停」进入奖池' },
-  { id: 'w_rank', pos: [4, 2], cat: 'wake', icon: '♛', name: '巅峰', cost: 0, unlock: 120, coresToUnlock: 1, wake: 'rank', vals: [10, 15, 20, 25], fmt: pct,
-    desc: '此后本局击杀金币 +{v}，评级掉到 A 以下时立刻回到 A。（每波一次）', needText: '局内火力评级第一次达到 S' },
-  { id: 't_debt', pos: [4, 3], cat: 'time', icon: '⧖', name: '借来的时间', cost: 3, unlock: 150, unlocks: ['timedebt'], vals: [0.5, 0.6, 0.8, 1], fmt: (v) => `${v} 秒`,
+  { id: 't_flow', pos: [4, 0], cat: 'time', icon: '◑', name: '冥想', cost: 1, unlock: 0, vals: [25, 40, 55, 75], fmt: pct, desc: '专注充能 +{v}。' },
+  { id: 't_stasis', pos: [4, 1], cat: 'time', icon: '⏸', name: '凝固之钟', cost: 2, unlock: 120, unlocks: ['stasis'], vals: [15, 20, 25, 35], fmt: pct,
+    desc: '子弹时间中伤害 +{v}；三选一中子弹时间流强化的出现权重 +60%。', unlockText: '解锁即让核心「时停」进入奖池' },
+  { id: 'w_rank', pos: [4, 2], cat: 'wake', icon: '♛', name: '凯旋', cost: 0, unlock: 120, coresToUnlock: 1, wake: 'boss', vals: [15, 20, 30, 40], fmt: pct,
+    desc: '击杀金币 +{v}。', needText: '本局第一次击破 Boss' },
+  { id: 't_debt', pos: [4, 3], cat: 'time', icon: '⧖', name: '借来的时间', cost: 3, unlock: 150, unlocks: ['timedebt'], vals: [0.6, 0.9, 1.2, 1.6], fmt: (v) => `${v} 秒`,
     desc: '子弹时间 +{v}。', unlockText: '解锁即让核心「时间债」进入奖池' },
-  { id: 'w_star', pos: [4, 4], cat: 'wake', icon: '✶', name: '群星', cost: 0, unlock: 150, coresToUnlock: 1, wake: 'all', vals: [10, 15, 20, 25], fmt: pct,
+  { id: 'w_star', pos: [4, 4], cat: 'wake', icon: '✶', name: '群星', cost: 0, unlock: 150, coresToUnlock: 1, wake: 'all', vals: [15, 20, 25, 30], fmt: pct,
     desc: '结算星尘 +{v}，开局多 1 个命运骰。', needText: '装备的卡覆盖全部五类（宽容 / 爆头 / 扫射 / 子弹时间 / 经济）' },
 ];
 

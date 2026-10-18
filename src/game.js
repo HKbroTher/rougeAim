@@ -329,9 +329,10 @@ export class Game {
     const run = this.run;
     for (const c of CARDS) {
       const school = { h_badge: 'head', s_badge: 'spray', t_badge: 'time' }[c.id];
-      if (school && R.hasCard(run, c.id)) this.openingPicks.push({ title: `${c.name} · 选择一个${SCHOOLS[school].name}强化`, opts: { school }, n: R.cv(run, c.id) });
+      if (!school || !R.hasCard(run, c.id)) continue;
+      for (let k = 0; k < R.cv(run, c.id); k++) this.openingPicks.push({ title: `${c.name} · 选择一个${SCHOOLS[school].name}强化`, opts: { school } });
     }
-    if (run.extraChoice) this.openingPicks.push({ title: '开局补给 · 选择一个强化', opts: {}, n: R.cv(run, 'e_supply') });
+    for (let k = 0; run.extraChoice && k < R.cv(run, 'e_supply'); k++) this.openingPicks.push({ title: '开局补给 · 选择一个强化', opts: {} });
     this.nextOpeningPick();
   }
 
@@ -572,7 +573,7 @@ export class Game {
     while (this.yawHist.length && this.yawHist[0].t < this.time - 0.4) this.yawHist.shift();
     this.flickReady = R.has(run, 'flickmaster') && this.yawHist.some((h) => Math.abs(h.yaw - this.yaw) >= Math.PI / 3);
     R.tickRating(run, dt);
-    if (run.justAwoke) { run.justAwoke = null; sfx.focus(); this.ui.banner('巅峰 · 觉醒'); }
+    if (run.justAwoke) { run.justAwoke = null; sfx.focus(); this.ui.banner('凯旋 · 觉醒'); }
 
     // 视野检测：用于「甩枪反应」统计
     this.camera.updateMatrixWorld();
@@ -685,7 +686,8 @@ export class Game {
     const fullHeat = R.has(run, 'overheat') && run.heat >= 20;
     if (fullHeat) bot.burn = { left: 2, acc: 0 };
 
-    this.hurtBot(bot, dmg, { head, onetap: wasFull, fullHeat, bonusRating: flick ? 6 : 0 });
+    this.hurtBot(bot, dmg, { head, onetap: wasFull, fullHeat });
+    if (flick) R.refundAmmo(run, 2); // 甩枪大师：甩枪爆头返还 2 发
     // Boss 弱点的专属效果（打断 / 破绽 / 拆除 / 清屏）
     if (bot.isBoss && head && !bot.dead) {
       const msg = bot.onWeakHit(this, { mesh: hit.object, dmg });
@@ -703,7 +705,7 @@ export class Game {
     if (bot.takeMul) dmg *= bot.takeMul(!!ctx.head, run); // Boss：身体 ×0.5（持续开火升到 ×1）、破绽 ×1.5
     const applied = Math.min(dmg, bot.hp);
     const killed = bot.damage(dmg);
-    R.onDamage(run, applied, killed, ctx.bonusRating || 0);
+    R.onDamage(run, applied, killed);
     if (killed) this.killBot(bot, ctx);
     return killed;
   }
@@ -716,6 +718,7 @@ export class Game {
       d *= R.headMultiplier(run);
       if (R.has(run, 'lethal')) d += 1.5;
       d += R.cv(run, 'h_aim');
+      d *= 1 + R.cv(run, 'h_pierce') / 100;
       d += execBonus;
       if (R.has(run, 'hawkeye') && bot.distance > 15) d *= 1.5;
       if (flick) d *= 2;
@@ -726,6 +729,7 @@ export class Game {
     if (calm) d *= 2;
     d *= R.tempDamageMul(run);
     if (R.inBulletTime(run) && R.has(run, 'freezeframe')) d *= 1.4;
+    if (R.inBulletTime(run)) d *= 1 + R.cv(run, 't_stasis') / 100;
     if (R.has(run, 'overheat')) d *= 1 + 0.03 * run.heat;
     if (R.has(run, 'rend') && bot.hitsTaken % 3 === 0) d *= 2.5;
     if (R.has(run, 'shred')) {
@@ -780,7 +784,7 @@ export class Game {
     if (R.has(run, 'bounty')) base += (ctx.head && !ctx.indirect ? 1 : 0) + (ctx.onetap ? 2 : 0);
     if (ctx.onetap) base *= 1 + R.cv(run, 'h_flick') / 100;
     const glance = ctx.head && R.has(run, 'glance') && bot.offscreenAt != null && this.time - bot.offscreenAt <= 1;
-    const gold = R.killGold(run, base, glance ? 2 : 1);
+    const gold = R.killGold(run, base, (glance ? 2 : 1) * (bot.type === 'heavy' && R.has(run, 'bountyhunter') ? 2 : 1));
     if (R.has(run, 'onetap') && ctx.head && !ctx.indirect) R.refundAmmo(run, ctx.onetap ? 3 : 1);
     R.onKillInBulletTime(run);
     const pos = bot.headWorld;
@@ -831,8 +835,9 @@ export class Game {
 
   killBoss(boss) {
     const run = this.run;
-    const gold = R.killGold(run, boss.def.gold);
+    const gold = R.killGold(run, boss.def.gold, R.has(run, 'bountyhunter') ? 1.5 : 1);
     run.stats.bossKills = (run.stats.bossKills || 0) + 1;
+    R.onBossKilled(run);
     this.shatterOrbs();
     this.world.fx.burst(boss.headWorld, boss.def.color, 60, 10);
     this.world.fx.shockwave(boss.position, 8, boss.def.color);
@@ -854,7 +859,6 @@ export class Game {
         this.hurtBot(b, 4, { indirect: true });
       }
     }
-    if (bt.highlight) this.floatCenter('高光时刻：评级提升', 'head');
     if (this.run.debtTime > 0) this.floatCenter('时间债：敌人加速', 'warn');
   }
 

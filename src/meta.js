@@ -109,7 +109,7 @@ export function deckUsed(save) {
 
 export const cardLevel = (save, id) => (cardUnlocked(save, id) ? save.deck.levels[id] || 1 : 0);
 
-// 觉醒条件。'rank' 在局内达成，这里只要解锁就算「待觉醒」
+// 觉醒条件。'boss' 在局内达成，这里只要解锁就算「待觉醒」
 // 上下左右相邻的普通卡（觉醒卡不算）
 export function cardNeighbors(card) {
   const [r, c] = card.pos;
@@ -118,7 +118,7 @@ export function cardNeighbors(card) {
 
 // 觉醒有两条路，满足任意一条即可：
 //   ① 相邻：上下左右的普通卡全部装备
-//   ② 各自的特殊条件（'rank' 在局内达成）
+//   ② 各自的特殊条件（'boss' 在局内达成）
 export function wakeRoutes(save, card) {
   const eq = save.deck.active.map(cardById).filter(Boolean);
   const adjacent = cardNeighbors(card).every((x) => cardEquipped(save, x.id));
@@ -133,7 +133,7 @@ export function wakeState(save, card) {
   if (card.cat !== 'wake' || !cardUnlocked(save, card.id)) return 'locked';
   const { adjacent, special } = wakeRoutes(save, card);
   if (adjacent || special) return 'awake';
-  return card.wake === 'rank' ? 'inrun' : 'dormant';
+  return card.wake === 'boss' ? 'inrun' : 'dormant';
 }
 
 export function cardAwake(save, card) {

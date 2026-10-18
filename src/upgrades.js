@@ -43,7 +43,7 @@ export const UPGRADES = {
   aftershock: { cat: 'school', school: 'head', set: '连锁', icon: '≋', name: '余震', desc: '震爆、穿透、灼烧造成的伤害 +50%。' },
   // ③ 甩枪：转身瞬间的那一枪
   flickmaster: { cat: 'core', school: 'head', set: '甩枪', icon: '↯', name: '甩枪大师', locked: true,
-    desc: '开枪前 0.4 秒内转身 ≥ 60° 时（准星变金），这一枪若爆头：伤害 ×2，火力评级 +6 进度。' },
+    desc: '开枪前 0.4 秒内转身 ≥ 60° 时（准星变金），这一枪若爆头：伤害 ×2，并返还 2 发子弹。' },
   hawkeye: { cat: 'school', school: 'head', set: '甩枪', icon: '◉', name: '鹰眼弹', locked: true, desc: '对 15 米外的目标，爆头伤害 +50%。' },
   glance: { cat: 'school', school: 'head', set: '甩枪', icon: '↶', name: '回眸', desc: '爆头击杀 1 秒前还在视野外的目标，金币 ×2。' },
   calm: { cat: 'school', school: 'head', set: '甩枪', icon: '☯', name: '静心', desc: '停火 ≥ 0.5 秒后的第一枪伤害 ×2。' },
@@ -70,7 +70,7 @@ export const UPGRADES = {
   rend: { cat: 'school', school: 'spray', set: '压制', icon: '⫽', name: '撕裂', desc: '每个目标被命中的第 3、6、9……发，伤害 ×2.5。' },
   shred: { cat: 'school', school: 'spray', set: '压制', icon: '⛏', name: '碎甲', desc: '被命中 ≥ 2 次的目标受到的伤害 +1；对重甲兵伤害 +50%。' },
   trackshield: { cat: 'school', school: 'spray', set: '压制', icon: '⛉', name: '跟枪护盾', desc: '本波持续开火累计 4 秒，获得 1 层护盾（每波一次，打空也算）。' },
-  steady: { cat: 'school', school: 'spray', set: '压制', icon: '▬', name: '稳定火力', desc: '火力评级不再随时间回落，打空也不扣进度。' },
+  adrenaline: { cat: 'school', school: 'spray', set: '压制', icon: '♨', name: '肾上腺素', desc: '持续开火每 1 秒回复 1 生命（每波最多回复 12）。' },
 
   // ---------------- 子弹时间流：爆发窗口 ----------------
   // ① 时停
@@ -85,7 +85,7 @@ export const UPGRADES = {
   focuslens: { cat: 'school', school: 'time', set: '续杯', icon: '◐', name: '专注透镜', desc: '专注充能 +40%，子弹时间 +0.5 秒。' },
   echo: { cat: 'school', school: 'time', set: '续杯', icon: '〰', name: '回响', desc: '一次子弹时间内击杀 ≥ 3 个，结束后返还 30% 专注。' },
   timeslit: { cat: 'school', school: 'time', set: '续杯', icon: '⧗', name: '时间缝隙', desc: '子弹时间中换弹瞬间完成。' },
-  highlight: { cat: 'school', school: 'time', set: '续杯', icon: '★', name: '高光时刻', desc: '一次子弹时间内造成 ≥ 40 点伤害，结束时火力评级直接升一级。' },
+  reloadmoment: { cat: 'school', school: 'time', set: '续杯', icon: '▤', name: '装填时刻', desc: '释放子弹时间时，弹匣立刻装满（正在换弹也直接完成）。' },
   // ③ 高频
   timedebt: { cat: 'core', school: 'time', set: '高频', icon: '⧖', name: '时间债', locked: true,
     desc: '专注 ≥ 25% 即可释放，时长按专注比例；结束后敌人以 1.5 倍速移动，持续时间与本次子弹时间相同。' },
@@ -95,8 +95,8 @@ export const UPGRADES = {
 
   // ---------------- 通用 ----------------
   recoilarmor: { cat: 'general', icon: '⛨', name: '反冲护甲', desc: '被碰到时，将 8 米内所有敌人击退 6 米。' },
-  safety: { cat: 'general', icon: '⚿', name: '保险栓', desc: '每波第一次被碰到时，火力评级不下降。' },
-  greedsight: { cat: 'general', icon: '◎', name: '贪婪准星', desc: '火力评级 ≥ A 时，击杀金币 +40%。' },
+  emergency: { cat: 'general', icon: '⚿', name: '应急护盾', desc: '每波第一次生命降到 40% 以下时，获得 2 层护盾。' },
+  bountyhunter: { cat: 'general', icon: '◎', name: '赏金猎人', desc: '击杀重甲兵金币 ×2，击破 Boss 金币 +50%。' },
   bloodpact: { cat: 'general', icon: '☠', name: '血色契约', locked: true, curse: true, desc: '【诅咒】敌人移动速度 +20%，但击杀金币 +40%。' },
 
   // ---------------- 经济（只在商店） ----------------

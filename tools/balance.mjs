@@ -6,10 +6,15 @@
 //       三选一和商店优先拿该流派（random = 全部解锁、随机拿，用来做全强化的冒烟测试）。
 // 打法：default / precision（点射，几乎只瞄头）/ spray（扫射，瞄身体按住不放）。
 //       不填时：爆头流用 precision，扫射流用 spray，其余用 default。
+// 命盘（环境变量）：DECK=best 或逗号分隔的卡牌 id，DECK_LV=1..4（全部卡牌等级），DECK_CAP=心力上限（10..30）
+//   例：DECK=best DECK_LV=4 DECK_CAP=30 node tools/balance.mjs average 6 2
 import { chromium } from 'playwright';
 
 const [skill = 'average', runsArg = '6', parArg = '3', base = 'http://localhost:8000/', school = '', styleArg = ''] = process.argv.slice(2);
 const style = styleArg || { head: 'precision', spray: 'spray' }[school] || 'default';
+// 推荐的 30 心力通用配置：宽容为主 + 一点火力；恰好 30 → 「满盘」觉醒，覆盖五类 → 「群星」觉醒
+const BEST = ['v_body', 'v_shield', 'v_aid', 'v_death', 'v_grit', 's_mag', 'h_aim', 't_flow', 's_suppress', 't_debt', 'e_supply', 'h_pierce', 's_heat', 'e_stake'];
+const deckEnv = process.env.DECK ? { ids: process.env.DECK === 'best' ? BEST : process.env.DECK.split(','), lv: Number(process.env.DECK_LV || 1), cap: Number(process.env.DECK_CAP || 30) } : null;
 const RUNS = Number(runsArg);
 const PAR = Number(parArg);
 const url = `${base}?debug&norender`;
@@ -23,8 +28,14 @@ async function playOne(i) {
   page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(url);
   await page.waitForFunction(() => window.game);
-  await page.evaluate(({ sk, school, style }) => {
+  await page.evaluate(({ sk, school, style, deck }) => {
     game.timeScale = 4;
+    if (deck) {
+      // 命盘：解锁全部卡牌，按等级和心力上限装备指定的卡
+      game.save.deck = { unlocked: CARDS.map((c) => c.id), levels: Object.fromEntries(CARDS.map((c) => [c.id, deck.lv])), capacityLv: Math.round((deck.cap - 10) / 2), active: [] };
+      for (const id of deck.ids) game.onAction('toggleCard', { id });
+      window.__deck = { used: game.save.deck.active.length, wake: CARDS.filter((c) => c.cat === 'wake').map((c) => c.id) };
+    }
     if (school) {
       // 解锁命盘全部普通卡（不装备，觉醒卡不解锁），携带对应流派遗物
       game.save.deck.unlocked = CARDS.filter((c) => c.cat !== 'wake').map((c) => c.id);
@@ -34,7 +45,7 @@ async function playOne(i) {
     window.__school = school;
     game.startRun();
     game.sim = new SimAimer(game, SKILLS[sk], style);
-  }, { sk: skill, school, style });
+  }, { sk: skill, school, style, deck: deckEnv });
   for (let guard = 0; guard < 20000; guard++) {
     const state = await page.evaluate(() => game.state);
     if (state === 'results') break;
@@ -114,7 +125,7 @@ await browser.close();
 const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN);
 const pct = (v) => (Number.isFinite(v) ? `${(v * 100).toFixed(0)}%` : '—');
 const waves = results.map((r) => r.victory ? 21 : r.waves + 1); // 死在第几波（通关记 21）
-console.log(`\n技能 ${skill}${school ? `，流派 ${school}` : ''}，打法 ${style}，${RUNS} 局`);
+console.log(`\n技能 ${skill}${school ? `，流派 ${school}` : ''}，打法 ${style}，${RUNS} 局${deckEnv ? `，命盘 ${deckEnv.ids.length} 张卡 Lv${deckEnv.lv}、心力 ${deckEnv.cap}` : ''}`);
 for (const r of results) console.log(`  强化：${r.ups}`);
 console.log(`死亡波次：${waves.map((w) => (w > 20 ? '通关' : w)).join(', ')}（平均 ${avg(waves).toFixed(1)}）`);
 console.log(`命中率 ${pct(avg(results.map((r) => r.acc)))}，爆头率 ${pct(avg(results.map((r) => r.hs)))}，移动目标命中率 ${pct(avg(results.map((r) => r.moverAcc).filter((v) => v != null)))}`);

@@ -169,7 +169,7 @@ export class UI {
     const act = activeCards(save);
     return CARDS.filter((c) => act.has(c.id)).map((c) => {
       const lv = cardLevel(save, c.id);
-      return `<span style="color:${CARD_CATS[c.cat].color}">${c.icon}</span> ${c.name}${lv > 1 ? ` Lv${lv}` : ''}${c.wake === 'rank' ? '（局内觉醒）' : ''}`;
+      return `<span style="color:${CARD_CATS[c.cat].color}">${c.icon}</span> ${c.name}${lv > 1 ? ` Lv${lv}` : ''}${c.wake === 'boss' ? '（局内觉醒）' : ''}`;
     }).join('　');
   }
 
@@ -563,7 +563,7 @@ export class UI {
     }
     $('rating-fill').style.width = `${Math.min(1, rt.points / t.need) * 100}%`;
     $('rating-gold').textContent = `金币 ×${R.goldMultiplier(run)}`;
-    box.classList.toggle('decay', rt.idle > RATING.decayDelay && rt.points > 0 && !R.has(run, 'steady'));
+    box.classList.toggle('decay', rt.idle > RATING.decayDelay && rt.points > 0);
     const fw = $('focus-wrap');
     const active = run.focusTime > 0;
     const ready = R.canActivateFocus(run);

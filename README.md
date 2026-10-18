@@ -64,7 +64,7 @@ Chrome / Edge 下默认开启原始输入；要和原游戏完全一致，Window
 - 视野外的 bot 靠近时，屏幕边缘对应方向亮起红光，越近越亮
 - 每波免费三选一强化；**卡戎商店**在每个区域结束（第 5、10、15 波后）出现，卖强化、治疗、生命之心、星尘；区域内随机出现**卡戎之井**，卖便宜的临时道具。**命运骰**（开局 2 个、每区域 +1）可以刷新三选一和商店，卡戎商店也能花金币刷新
 - 结算界面：最高评级、爆头、精准度、甩枪反应、星尘结算明细、**本局每次逛店的决策记录**
-- 局外：**命盘**（参考 Hades 2 的塔罗牌）——5×5 共 25 张卡，星尘解锁、每张可升 3 级（第 4 级要星核）；心力最高 24 而卡牌总消耗 52，只能带一半不到；4 张觉醒卡各有两条觉醒路线：上下左右的卡全装，或各自的特殊条件（心力恰好用满 / 只带 ≤4 张 / 局内打到 S / 覆盖五类）；开局携带 1 个**遗物**；枪法档案；调参数据面板
+- 局外：**命盘**（参考 Hades 2 的塔罗牌）——5×5 共 25 张卡，星尘解锁、每张可升 3 级（第 4 级要星核）；心力最高 30 而卡牌总消耗 52，只能带一半多一点；4 张觉醒卡各有两条觉醒路线：上下左右的卡全装，或各自的特殊条件（心力恰好用满 / 只带 ≤4 张 / 局内第一次击破 Boss / 覆盖五类）；开局携带 1 个**遗物**；枪法档案；调参数据面板
 - 界面：CRT 复古终端风格（扫描线、荧光、像素字体，战斗中关闭扫描线）
 
 ## 原型的验证重点：商店是否让人犹豫
@@ -134,6 +134,7 @@ node tools/smoke.mjs http://localhost:8000/?debug ./shots
 node tools/balance.mjs average 6 3 http://localhost:8000/        # 技能 局数 并行数
 node tools/balance.mjs average 6 3 http://localhost:8000/ head   # 指定流派：head / spray / time / random
 node tools/balance.mjs expert 6 2 http://localhost:8000/ spray spray  # 第 6 个参数是打法：default / precision / spray
+DECK=best DECK_LV=4 DECK_CAP=30 node tools/balance.mjs average 6 2 http://localhost:8000/  # 带命盘测试：卡牌配置、等级、心力
 node tools/upgrade-tests.mjs "http://localhost:8000/?debug&norender"  # 强化机制测试
 ```
 

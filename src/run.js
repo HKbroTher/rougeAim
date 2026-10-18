@@ -14,14 +14,13 @@ export function createRun(save) {
     maxHp,
     cards,
     cardLv: levels,
-    shield: cv('v_shield'),
+    shield: 0,          // 护盾发生器在每波开始时补
     gold: cv('e_stake'),
     // 火力评级：tier 0..4（D..S），points 当前等级的进度，idle 多久没造成伤害
     rating: { tier: 0, points: 0, idle: 0, peak: 0 },
     ratingScore: 0,  // 每波结束时的评级累加（结算星尘）
     reviveUsed: false,
-    rankAwake: wakeState(save, CARD_BY_ID.w_rank) === 'awake', // 巅峰：相邻卡全装则开局就觉醒，否则本局评级第一次到 S 后觉醒
-    rankSaveUsed: false,
+    rankAwake: wakeState(save, CARD_BY_ID.w_rank) === 'awake', // 凯旋：相邻卡全装则开局就觉醒，否则本局第一次击破 Boss 后觉醒
     unlockedCards: [...save.deck.unlocked],
     gifted: [],        // 独行：本局额外激活的卡
     focus: 0,
@@ -53,7 +52,8 @@ export function createRun(save) {
     stardustBuys: 0,
     shopCount: 0,
     stardustFromShop: 0,
-    safetyUsed: false,
+    emergencyUsed: false,
+    adrenalineHealed: 0,
     chainStacks: 0,
     stats: { shots: 0, hits: 0, headshots: 0, kills: 0, goldEarned: 0, damageTaken: 0, misses: 0, tierDrops: 0, reloads: 0, moverHits: 0, moverMisses: 0, damage: 0 },
     shopVisits: [],
@@ -88,7 +88,6 @@ function addRating(run, pts) {
   }
   if (r.tier === MAX_TIER) r.points = Math.min(r.points, RATING.tiers[MAX_TIER].need);
   r.peak = Math.max(r.peak, r.tier);
-  if (r.tier === MAX_TIER && hasCard(run, 'w_rank') && !run.rankAwake) { run.rankAwake = true; run.justAwoke = 'w_rank'; }
 }
 
 function dropTier(run) {
@@ -97,24 +96,18 @@ function dropTier(run) {
   r.tier--;
   r.points = RATING.tiers[r.tier].need * RATING.dropKeep;
   run.stats.tierDrops++;
-  // 巅峰：评级掉到 A 以下时立刻回到 A（每波一次）
-  if (run.rankAwake && r.tier < MAX_TIER - 1 && !run.rankSaveUsed) {
-    run.rankSaveUsed = true;
-    r.tier = MAX_TIER - 1;
-    r.points = 0;
-  }
 }
 
-export function raiseTier(run) {
-  const r = run.rating;
-  if (r.tier < MAX_TIER) { r.tier++; r.points = 0; r.peak = Math.max(r.peak, r.tier); }
+// 凯旋：本局第一次击破 Boss 后觉醒
+export function onBossKilled(run) {
+  if (hasCard(run, 'w_rank') && !run.rankAwake) { run.rankAwake = true; run.justAwoke = 'w_rank'; }
 }
 
 // 每帧：一段时间没造成伤害就慢慢回落（稳定火力：不回落）
 export function tickRating(run, dt) {
   const r = run.rating;
   r.idle += dt;
-  if (has(run, 'steady') || r.idle < RATING.decayDelay) return;
+  if (r.idle < RATING.decayDelay) return;
   r.points -= RATING.decayRate * Math.min(dt, r.idle - RATING.decayDelay);
   if (r.points < 0) {
     if (r.tier === 0) r.points = 0;
@@ -134,6 +127,7 @@ export function headMultiplier(run) {
 export function fireInterval(run, base) {
   let rate = (1 + 0.08 * run.chainStacks) * (1 + 0.05 * lv(run, 'trigger'));
   if (has(run, 'rapid')) rate *= 1.15;
+  rate *= 1 + cv(run, 's_heat') / 100;
   if (has(run, 'spinup')) rate *= 1 + 0.08 * Math.min(5, Math.floor(run.sprayTime / 0.5));
   if (inBulletTime(run) && has(run, 'overclock')) rate *= 1.3;
   return base / rate;
@@ -196,6 +190,12 @@ export function tickFire(run, dt, active) {
   if (active) {
     run.idle = 0;
     run.sprayTime += dt;
+    // 肾上腺素：持续开火每秒回复 1 生命（每波最多 12）
+    if (has(run, 'adrenaline') && run.adrenalineHealed < 12) {
+      const h = Math.min(dt, 12 - run.adrenalineHealed);
+      run.adrenalineHealed += h;
+      run.hp = Math.min(run.maxHp, run.hp + h);
+    }
     if (has(run, 'overheat')) run.heat = Math.min(20, run.heat + 10 * dt);
     if (has(run, 'beltfeed')) {
       run.beltAcc += dt;
@@ -242,6 +242,8 @@ export function canActivateFocus(run) {
 
 export function activateFocus(run) {
   if (!canActivateFocus(run)) return false;
+  // 装填时刻：释放子弹时间时弹匣立刻装满
+  if (has(run, 'reloadmoment')) { run.reloadLeft = 0; run.ammo = magSize(run); }
   const frac = has(run, 'timedebt') ? run.focus / focusMax(run) : 1;
   run.focus = 0;
   run.focusTime = focusDuration(run) * frac;
@@ -257,13 +259,11 @@ function extendBulletTime(run, sec) {
   run.focusTotal += sec * k;
 }
 
-// 子弹时间结束时调用，返回本次统计（highlight = 高光时刻触发）
+// 子弹时间结束时调用，返回本次统计
 export function endBulletTime(run) {
   const bt = run.bt || { kills: 0, dmg: 0, hitBots: new Set() };
   if (has(run, 'echo') && bt.kills >= 3) run.focus = Math.min(focusMax(run), focusMax(run) * 0.3);
   if (has(run, 'timedebt')) run.debtTime = run.focusTotal;
-  bt.highlight = has(run, 'highlight') && bt.dmg >= 40;
-  if (bt.highlight) raiseTier(run);
   run.bt = null;
   return bt;
 }
@@ -285,15 +285,15 @@ export function registerHit(run, headshot, { extra = false } = {}) {
 export function registerMiss(run) {
   run.stats.misses++;
   run.chainStacks = 0;
-  if (!has(run, 'steady')) addRating(run, -Math.min(run.rating.points, RATING.missPenalty));
+  addRating(run, -Math.min(run.rating.points, RATING.missPenalty));
 }
 
 // 对敌人实际造成的伤害（溢出不算），所有来源（子弹、穿透、震爆、灼烧）都走这里。
 // 评级与专注都按伤害增长，所以爆头和身体按各自的伤害算，不再额外偏向爆头。
-export function onDamage(run, applied, killed, bonusRating = 0) {
+export function onDamage(run, applied, killed) {
   run.stats.damage += applied;
   run.rating.idle = 0;
-  addRating(run, applied + (killed ? RATING.killBonus : 0) + bonusRating);
+  addRating(run, applied + (killed ? RATING.killBonus : 0));
   addFocus(run, applied * FOCUS.perDamage);
   const bt = inBulletTime(run) && run.bt;
   if (!bt) return;
@@ -327,7 +327,6 @@ export function goldMultiplier(run) {
 export function killGold(run, base, extraMul = 1) {
   let g = base * goldMultiplier(run) * extraMul * (1 + 0.08 * lv(run, 'fortune'));
   if (hasTemp(run, 'greed')) g *= 1.4;
-  if (has(run, 'greedsight') && run.rating.tier >= 3) g *= 1.4;
   if (has(run, 'bloodpact')) g *= 1.4;
   if (run.rankAwake) g *= 1 + cv(run, 'w_rank') / 100;
   const gold = Math.max(1, Math.round(g));
@@ -343,13 +342,16 @@ export function takeDamage(run, dmg) {
     run.shield--;
     return { absorbed: true, dead: false };
   }
-  if (run.hp < run.maxHp * 0.4) dmg *= 1 - cv(run, 'v_grit') / 100;
+  // 背水：受到的伤害 −x%，生命低于 40% 时翻倍
+  const grit = cv(run, 'v_grit') / 100;
+  if (grit) dmg *= 1 - (run.hp < run.maxHp * 0.4 ? grit * 2 : grit);
   dmg = Math.round(dmg);
   run.hp = Math.max(0, run.hp - dmg);
   run.stats.damageTaken += dmg;
-  // 被碰到降一级评级（保险栓：每波第一次不降）
-  if (has(run, 'safety') && !run.safetyUsed) run.safetyUsed = true;
-  else dropTier(run);
+  // 被碰到降一级评级
+  dropTier(run);
+  // 应急护盾：每波第一次降到 40% 以下，获得 2 层护盾
+  if (has(run, 'emergency') && !run.emergencyUsed && run.hp > 0 && run.hp < run.maxHp * 0.4) { run.emergencyUsed = true; run.shield += 2; }
   if (run.hp <= 0 && hasCard(run, 'v_death') && !run.reviveUsed) {
     run.reviveUsed = true;
     run.hp = Math.round(run.maxHp * cv(run, 'v_death') / 100);
@@ -374,7 +376,8 @@ export function logWaveEnd(run, cleared) {
 
 export function startWave(run) {
   run.waveLog.push({ wave: run.waveIndex + 1, start: snapshot(run) });
-  run.safetyUsed = false;
+  run.emergencyUsed = false;
+  run.adrenalineHealed = 0;
   run.trackShieldUsed = false;
   run.waveFireTime = 0;
   run.ammo = magSize(run);
@@ -386,7 +389,7 @@ export function startWave(run) {
   run.sprayTime = 0;
   run.beltAcc = 0;
   run.rating.idle = 0;
-  run.rankSaveUsed = false;
+  run.shield = Math.max(run.shield, cv(run, 'v_shield'));
   if (hasCard(run, 'w_full')) {
     run.shield = Math.max(run.shield, 1);
     run.hp = Math.min(run.maxHp, run.hp + cv(run, 'w_full'));
@@ -427,7 +430,6 @@ export function giftCards(run, n) {
     // 开局才生效的数值，激活时立刻补上
     const v = cv(run, c.id);
     if (c.id === 'v_body') { run.maxHp += v; run.hp += v; }
-    if (c.id === 'v_shield') run.shield += v;
     if (c.id === 'e_stake') run.gold += v;
     if (c.id === 'e_fate') run.rerolls += v;
   }
@@ -464,7 +466,7 @@ function schoolWeights(run) {
   }
   const w = {};
   const card = { head: 'h_pierce', spray: 's_heat', time: 't_stasis' };
-  for (const s of Object.keys(owned)) w[s] = Math.min(3, 1 + 0.4 * owned[s]) * (1 + cv(run, card[s]) / 100);
+  for (const s of Object.keys(owned)) w[s] = Math.min(3, 1 + 0.4 * owned[s]) * (hasCard(run, card[s]) ? 1.6 : 1);
   return w;
 }
 
