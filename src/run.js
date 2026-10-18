@@ -1,7 +1,7 @@
 // 单局状态与规则（不依赖渲染，便于单测和平衡模拟）。
 import { PLAYER, WEAPON, RATING, FOCUS, SHOP, WAVES, KEEPSAKES, WELL, WELL_ITEMS, CARDS, cardValue } from './config.js';
 import { UPGRADES, BASE_MAX_LEVEL } from './upgrades.js';
-import { unlockedUpgrades, keepsakeLevel, activeCards, cardLevels, wakeState } from './meta.js';
+import { unlockedUpgrades, keepsakeLevel, activeCards, cardLevels } from './meta.js';
 
 export function createRun(save) {
   const cards = activeCards(save);
@@ -14,13 +14,13 @@ export function createRun(save) {
     maxHp,
     cards,
     cardLv: levels,
-    shield: 0,          // 护盾发生器在每波开始时补
+    shield: cards.has('v_shield') ? 1 : 0, // 护盾发生器：开局 1 层，之后定时补
+    shieldTimer: 0,
     gold: cv('e_stake'),
     // 火力评级：tier 0..4（D..S），points 当前等级的进度，idle 多久没造成伤害
     rating: { tier: 0, points: 0, idle: 0, peak: 0 },
     ratingScore: 0,  // 每波结束时的评级累加（结算星尘）
     reviveUsed: false,
-    rankAwake: wakeState(save, CARD_BY_ID.w_rank) === 'awake', // 凯旋：相邻卡全装则开局就觉醒，否则本局第一次击破 Boss 后觉醒
     unlockedCards: [...save.deck.unlocked],
     gifted: [],        // 独行：本局额外激活的卡
     focus: 0,
@@ -98,9 +98,16 @@ function dropTier(run) {
   run.stats.tierDrops++;
 }
 
-// 凯旋：本局第一次击破 Boss 后觉醒
-export function onBossKilled(run) {
-  if (hasCard(run, 'w_rank') && !run.rankAwake) { run.rankAwake = true; run.justAwoke = 'w_rank'; }
+// 护盾发生器：每隔一段时间获得 1 层护盾（最多存 2 层）。只在战斗中计时（真实时间）
+export function tickShieldGen(run, dt) {
+  const every = cv(run, 'v_shield');
+  if (!every) return false;
+  if (run.shield >= 2) { run.shieldTimer = 0; return false; }
+  run.shieldTimer += dt;
+  if (run.shieldTimer < every) return false;
+  run.shieldTimer = 0;
+  run.shield++;
+  return true;
 }
 
 // 每帧：一段时间没造成伤害就慢慢回落（稳定火力：不回落）
@@ -328,7 +335,7 @@ export function killGold(run, base, extraMul = 1) {
   let g = base * goldMultiplier(run) * extraMul * (1 + 0.08 * lv(run, 'fortune'));
   if (hasTemp(run, 'greed')) g *= 1.4;
   if (has(run, 'bloodpact')) g *= 1.4;
-  if (run.rankAwake) g *= 1 + cv(run, 'w_rank') / 100;
+  g *= 1 + cv(run, 'w_rank') / 100;
   const gold = Math.max(1, Math.round(g));
   run.gold += gold;
   run.stats.goldEarned += gold;
@@ -389,7 +396,6 @@ export function startWave(run) {
   run.sprayTime = 0;
   run.beltAcc = 0;
   run.rating.idle = 0;
-  run.shield = Math.max(run.shield, cv(run, 'v_shield'));
   if (hasCard(run, 'w_full')) {
     run.shield = Math.max(run.shield, 1);
     run.hp = Math.min(run.maxHp, run.hp + cv(run, 'w_full'));

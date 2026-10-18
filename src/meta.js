@@ -1,5 +1,5 @@
 // 局外存档：星尘、命盘、遗物、设置、枪法档案与商店决策日志（用于调价）。
-import { CARDS, DECK_CAPACITY, KEEPSAKES, LEGACY_REFUND, CARD_MAX_LV, CARD_CATS, cardUpgradeCost } from './config.js';
+import { CARDS, DECK_CAPACITY, KEEPSAKES, LEGACY_REFUND, CARD_MAX_LV, cardUpgradeCost } from './config.js';
 import { migrateSettings } from './sens.js';
 
 const KEY = 'rougeaim.save.v1';
@@ -109,39 +109,38 @@ export function deckUsed(save) {
 
 export const cardLevel = (save, id) => (cardUnlocked(save, id) ? save.deck.levels[id] || 1 : 0);
 
-// 觉醒条件。'boss' 在局内达成，这里只要解锁就算「待觉醒」
 // 上下左右相邻的普通卡（觉醒卡不算）
 export function cardNeighbors(card) {
   const [r, c] = card.pos;
   return CARDS.filter((x) => x.cat !== 'wake' && Math.abs(x.pos[0] - r) + Math.abs(x.pos[1] - c) === 1);
 }
 
-// 觉醒有两条路，满足任意一条即可：
-//   ① 相邻：上下左右的普通卡全部装备
-//   ② 各自的特殊条件（'boss' 在局内达成）
-export function wakeRoutes(save, card) {
-  const eq = save.deck.active.map(cardById).filter(Boolean);
-  const adjacent = cardNeighbors(card).every((x) => cardEquipped(save, x.id));
-  let special = false;
-  if (card.wake === 'full') special = eq.length > 0 && deckUsed(save) === deckCapacity(save);
-  else if (card.wake === 'few') special = eq.length > 0 && eq.length <= 4;
-  else if (card.wake === 'all') special = Object.keys(CARD_CATS).filter((c) => c !== 'wake').every((c) => eq.some((x) => x.cat === c));
-  return { adjacent, special };
+// 同一行的其他普通卡
+export function cardRow(card) {
+  return CARDS.filter((x) => x.cat !== 'wake' && x.pos[0] === card.pos[0] && x !== card);
+}
+
+// 觉醒条件（每张觉醒卡只有一个）：
+//   adjAll 上下左右相邻的卡全部装备 / row 所在行其余卡全部装备 / adjOne 相邻的卡至少装备一张 / few 装备不超过 4 张
+export function wakeMet(save, card) {
+  const on = (x) => cardEquipped(save, x.id);
+  if (card.wake === 'adjAll') return cardNeighbors(card).every(on);
+  if (card.wake === 'row') return cardRow(card).every(on);
+  if (card.wake === 'adjOne') return cardNeighbors(card).some(on);
+  if (card.wake === 'few') return save.deck.active.length > 0 && save.deck.active.length <= 4;
+  return false;
 }
 
 export function wakeState(save, card) {
   if (card.cat !== 'wake' || !cardUnlocked(save, card.id)) return 'locked';
-  const { adjacent, special } = wakeRoutes(save, card);
-  if (adjacent || special) return 'awake';
-  return card.wake === 'boss' ? 'inrun' : 'dormant';
+  return wakeMet(save, card) ? 'awake' : 'dormant';
 }
 
 export function cardAwake(save, card) {
-  const st = wakeState(save, card);
-  return st === 'awake' || st === 'inrun';
+  return wakeState(save, card) === 'awake';
 }
 
-// 本局带进去的卡（装备的 + 觉醒的 / 待局内觉醒的）
+// 本局带进去的卡（装备的 + 觉醒的）
 export function activeCards(save) {
   const out = new Set(save.deck.active.filter((id) => cardUnlocked(save, id)));
   for (const c of CARDS) if (cardAwake(save, c)) out.add(c.id);

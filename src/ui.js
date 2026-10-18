@@ -1,7 +1,7 @@
 // DOM 界面：HUD 与各个全屏界面。按钮通过 data-action 统一派发给 game。
 import { UPGRADES, SCHOOLS, CAT_LABEL, BASE_MAX_LEVEL } from './upgrades.js';
 import { KEEPSAKES, BOTS, BOSSES, WAVES, FOCUS, SHOP, SETTLEMENT, WEAPON, WELL, WELL_ITEMS, RATING, CARDS, CARD_CATS, DECK_SIZE, DECK_CAPACITY, CARD_MAX_LV, cardValue } from './config.js';
-import { keepsakeLevel, shopStats, cardUnlocked, cardEquipped, wakeState, deckCapacity, deckUsed, nextCapacityCost, activeCards, cardLevel, nextCardUpgrade, cardNeighbors, wakeRoutes } from './meta.js';
+import { keepsakeLevel, shopStats, cardUnlocked, cardEquipped, wakeState, deckCapacity, deckUsed, nextCapacityCost, activeCards, cardLevel, nextCardUpgrade, wakeMet } from './meta.js';
 import * as R from './run.js';
 import { gameSens, cm360, equivalents, GAME_YAW, FOV_PRESETS } from './sens.js';
 
@@ -169,7 +169,7 @@ export class UI {
     const act = activeCards(save);
     return CARDS.filter((c) => act.has(c.id)).map((c) => {
       const lv = cardLevel(save, c.id);
-      return `<span style="color:${CARD_CATS[c.cat].color}">${c.icon}</span> ${c.name}${lv > 1 ? ` Lv${lv}` : ''}${c.wake === 'boss' ? '（局内觉醒）' : ''}`;
+      return `<span style="color:${CARD_CATS[c.cat].color}">${c.icon}</span> ${c.name}${lv > 1 ? ` Lv${lv}` : ''}`;
     }).join('　');
   }
 
@@ -199,8 +199,8 @@ export class UI {
         foot = `<span class="stardust">✦ ${card.unlock}</span>${needCore ? ` <span class="core-txt">◆ ${needCore}</span>` : ''} 解锁`;
       } else if (wake) {
         const st = wakeState(save, card);
-        state = st === 'awake' ? 'on awake' : st === 'inrun' ? 'inrun' : 'dormant';
-        foot = { awake: '已觉醒', inrun: '局内觉醒', dormant: '未觉醒' }[st];
+        state = st === 'awake' ? 'on awake' : 'dormant';
+        foot = st === 'awake' ? '已觉醒' : '未觉醒';
       } else {
         const on = cardEquipped(save, card.id);
         const fits = used + card.cost <= cap;
@@ -217,10 +217,8 @@ export class UI {
       const pips = wake ? '<span class="pip-wake">0</span>' : '◆'.repeat(card.cost);
       let extra = card.unlockText ? `<div class="cond">${card.unlockText}</div>` : '';
       if (wake) {
-        // 两条觉醒路线，满足任一即可；已满足的打勾
-        const r = wakeRoutes(save, card);
-        const mark = (ok) => `<b class="${ok ? 'ok' : ''}">${ok ? '✓' : '·'}</b>`;
-        extra += `<div class="cond wake-routes">觉醒（任一）：<br>${mark(r.adjacent)} 相邻全装：${cardNeighbors(card).map((x) => x.name).join('、')}<br>${mark(r.special)} ${card.needText}</div>`;
+        const ok = wakeMet(save, card);
+        extra += `<div class="cond wake-routes"><b class="${ok ? 'ok' : ''}">${ok ? '✓' : '·'}</b> 觉醒：${card.needText}</div>`;
       }
       return `<div class="deck-card ${state} ${dis ? 'dis' : ''}" style="--cc:${cat.color}" ${action ? `data-action="${action}"` : ''} data-id="${card.id}">
         <div class="dc-top"><span class="dc-cost">${pips}</span>${lvPips}<span class="dc-cat">${cat.name}</span></div>
@@ -245,7 +243,7 @@ export class UI {
         ${capCost == null ? '<button class="btn" disabled>心力已满</button>' : `<button class="btn" data-action="buyCapacity" ${save.stardust < capCost ? 'disabled' : ''}>心力 +${DECK_CAPACITY.step}　✦ ${capCost}</button>`}
       </div>
       <p class="small dim">星尘解锁卡牌；装备的卡总消耗（◆）不能超过心力上限——所有卡加起来 ${CARDS.reduce((a, c) => a + c.cost, 0)} 点，心力最多 ${DECK_CAPACITY.base + DECK_CAPACITY.step * DECK_CAPACITY.costs.length}，只能带一半不到。
-        每张卡能升 3 次（▲，第 4 级要 1 个 <span class="core-txt">◆ 星核</span>，每打完一个区域得 1 个）。<b style="color:${CARD_CATS.wake.color}">觉醒卡</b>不占心力，两条路满足任一就自动生效：上下左右的卡全部装备，或者它自己的特殊条件。解锁带「核心」的卡牌会让对应的强化进入奖池（不需要装备）。</p>
+        每张卡能升 3 次（▲；消耗 ≥ 3 的卡和觉醒卡升到第 4 级要 1 个 <span class="core-txt">◆ 星核</span>，每打完一个区域得 1 个）。<b style="color:${CARD_CATS.wake.color}">觉醒卡</b>不占心力，满足各自的条件后自动生效。解锁带「核心」的卡牌会让对应的强化进入奖池（不需要装备）。</p>
       <div class="deck-grid">${tiles}</div>
       <h3>遗物（开局携带 1 个）</h3><div style="display:grid;gap:8px">${ks}</div>`;
   }

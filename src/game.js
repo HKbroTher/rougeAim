@@ -573,7 +573,7 @@ export class Game {
     while (this.yawHist.length && this.yawHist[0].t < this.time - 0.4) this.yawHist.shift();
     this.flickReady = R.has(run, 'flickmaster') && this.yawHist.some((h) => Math.abs(h.yaw - this.yaw) >= Math.PI / 3);
     R.tickRating(run, dt);
-    if (run.justAwoke) { run.justAwoke = null; sfx.focus(); this.ui.banner('凯旋 · 觉醒'); }
+    if (R.tickShieldGen(run, dt)) { sfx.shield(); this.floatCenter('护盾发生器 +1', 'info'); }
 
     // 视野检测：用于「甩枪反应」统计
     this.camera.updateMatrixWorld();
@@ -837,7 +837,6 @@ export class Game {
     const run = this.run;
     const gold = R.killGold(run, boss.def.gold, R.has(run, 'bountyhunter') ? 1.5 : 1);
     run.stats.bossKills = (run.stats.bossKills || 0) + 1;
-    R.onBossKilled(run);
     this.shatterOrbs();
     this.world.fx.burst(boss.headWorld, boss.def.color, 60, 10);
     this.world.fx.shockwave(boss.position, 8, boss.def.color);
