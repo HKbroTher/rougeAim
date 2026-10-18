@@ -1,5 +1,5 @@
 // 局外存档：星尘、命盘、遗物、设置、枪法档案与商店决策日志（用于调价）。
-import { CARDS, DECK_CAPACITY, KEEPSAKES, LEGACY_REFUND } from './config.js';
+import { CARDS, DECK_CAPACITY, KEEPSAKES, LEGACY_REFUND, CARD_MAX_LV, CARD_CATS, cardUpgradeCost } from './config.js';
 import { migrateSettings } from './sens.js';
 
 const KEY = 'rougeaim.save.v1';
@@ -11,8 +11,9 @@ function defaults() {
   return {
     version: 2,
     stardust: 0,
-    // 命盘：unlocked 已解锁的卡，active 已装备的卡，capacityLv 心力上限升级次数
-    deck: { unlocked: [...STARTER_CARDS], active: [], capacityLv: 0 },
+    cores: 0,                // 星核：每打完一个区域 +1，用于卡牌第 4 级和解锁觉醒卡
+    // 命盘：unlocked 已解锁的卡，active 已装备的卡，levels 卡牌等级（默认 1），capacityLv 心力上限升级次数
+    deck: { unlocked: [...STARTER_CARDS], active: [], levels: {}, capacityLv: 0 },
     keepsakes: { hunter: 1, drum: 1, watch: 1 }, // 拥有的遗物（三个流派遗物默认拥有）
     keepsake: null,          // 本局携带的遗物
     // 灵敏度：sensSource（cs2 / valorant / cm360）+ sensInput（该来源下的数值）；fov 为垂直视野（度）
@@ -54,6 +55,19 @@ export function loadSave() {
     if (!parsed.version) save.version = 1;
     migrate(save);
     save.deck = { ...defaults().deck, ...save.deck };
+    // 卡牌改版：删掉已经不存在的卡（坚韧之心、盾之觉醒、不屈、金之觉醒），退还解锁花费
+    const OLD = { v_heart: 150, w_shield: 90, w_revive: 180, w_gold: 120 };
+    for (const [id, cost] of Object.entries(OLD)) {
+      if (save.deck.unlocked.includes(id)) { save.stardust += cost; save.refunded = (save.refunded || 0) + cost; }
+    }
+    save.deck.unlocked = save.deck.unlocked.filter((id) => cardById(id));
+    save.deck.active = save.deck.active.filter((id) => cardById(id) && cardById(id).cat !== 'wake');
+    save.deck.levels ||= {};
+    save.cores ||= 0;
+    // 心力上限改为最高 24：超出的升级次数退还
+    const extra = save.deck.capacityLv - DECK_CAPACITY.costs.length;
+    if (extra > 0) { save.deck.capacityLv = DECK_CAPACITY.costs.length; save.stardust += 300 * extra; save.refunded = (save.refunded || 0) + 300 * extra; }
+    while (deckUsed(save) > deckCapacity(save)) save.deck.active.pop();
     migrateSettings(save.settings); // 旧版本的灵敏度倍率换算成 CS2 单位，手感不变
     return save;
   } catch {
@@ -93,23 +107,62 @@ export function deckUsed(save) {
   return save.deck.active.reduce((a, id) => a + (cardById(id)?.cost || 0), 0);
 }
 
-// 觉醒卡：已解锁 + 条件里的卡全部装备
-export function cardAwake(save, card) {
-  return card.cat === 'wake' && cardUnlocked(save, card.id) && card.need.every((id) => cardEquipped(save, id));
+export const cardLevel = (save, id) => (cardUnlocked(save, id) ? save.deck.levels[id] || 1 : 0);
+
+// 觉醒条件。'rank' 在局内达成，这里只要解锁就算「待觉醒」
+export function wakeState(save, card) {
+  if (card.cat !== 'wake' || !cardUnlocked(save, card.id)) return 'locked';
+  const eq = save.deck.active.map(cardById).filter(Boolean);
+  let ok = false;
+  if (card.wake === 'full') ok = eq.length > 0 && deckUsed(save) === deckCapacity(save);
+  else if (card.wake === 'few') ok = eq.length > 0 && eq.length <= 4;
+  else if (card.wake === 'all') ok = Object.keys(CARD_CATS).filter((c) => c !== 'wake').every((c) => eq.some((x) => x.cat === c));
+  else if (card.wake === 'rank') return 'inrun';
+  return ok ? 'awake' : 'dormant';
 }
 
-// 本局生效的卡（装备的 + 觉醒的）
+export function cardAwake(save, card) {
+  const st = wakeState(save, card);
+  return st === 'awake' || st === 'inrun';
+}
+
+// 本局带进去的卡（装备的 + 觉醒的 / 待局内觉醒的）
 export function activeCards(save) {
   const out = new Set(save.deck.active.filter((id) => cardUnlocked(save, id)));
   for (const c of CARDS) if (cardAwake(save, c)) out.add(c.id);
   return out;
 }
 
+export function cardLevels(save) {
+  const out = {};
+  for (const id of save.deck.unlocked) out[id] = cardLevel(save, id);
+  return out;
+}
+
 export function unlockCard(save, id) {
   const c = cardById(id);
-  if (!c || cardUnlocked(save, id) || save.stardust < c.unlock) return false;
+  const cores = c?.coresToUnlock || 0;
+  if (!c || cardUnlocked(save, id) || save.stardust < c.unlock || (save.cores || 0) < cores) return false;
   save.stardust -= c.unlock;
+  save.cores = (save.cores || 0) - cores;
   save.deck.unlocked.push(id);
+  persist(save);
+  return true;
+}
+
+export function nextCardUpgrade(save, id) {
+  const c = cardById(id);
+  const lv = cardLevel(save, id);
+  if (!c || !lv || lv >= CARD_MAX_LV) return null;
+  return cardUpgradeCost(c, lv + 1);
+}
+
+export function upgradeCard(save, id) {
+  const cost = nextCardUpgrade(save, id);
+  if (!cost || save.stardust < cost.dust || (save.cores || 0) < cost.cores) return false;
+  save.stardust -= cost.dust;
+  save.cores = (save.cores || 0) - cost.cores;
+  save.deck.levels[id] = cardLevel(save, id) + 1;
   persist(save);
   return true;
 }

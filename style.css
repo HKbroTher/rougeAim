@@ -273,8 +273,8 @@ input[type=checkbox] { pointer-events: auto; width: 18px; height: 18px; accent-c
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(0, 0, 0, 0.25)); border: 1px solid #234536; border-radius: 6px;
   transition: transform 0.12s, box-shadow 0.12s, border-color 0.12s; }
 .deck-card::before { content: ''; position: absolute; inset: 3px; border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 4px; pointer-events: none; }
-.deck-card:hover:not(:disabled) { transform: translateY(-3px); border-color: var(--cc); }
-.deck-card:disabled { cursor: default; }
+.deck-card:hover:not(.dis):not(.dormant):not(.inrun) { transform: translateY(-3px); border-color: var(--cc); }
+.deck-card.dis, .deck-card.dormant, .deck-card.inrun { cursor: default; }
 .dc-top { width: 100%; display: flex; justify-content: space-between; font-size: 11px; }
 .dc-cost { color: var(--cc); letter-spacing: -1px; }
 .pip-wake { font-family: var(--mono); font-size: 14px; }
@@ -286,7 +286,7 @@ input[type=checkbox] { pointer-events: auto; width: 18px; height: 18px; accent-c
 .dc-foot { font-size: 11px; color: var(--dim); border-top: 1px dashed #234536; width: 100%; padding-top: 4px; }
 .deck-card.locked { opacity: 0.55; background: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.02) 0 6px, transparent 6px 12px); }
 .deck-card.locked .dc-icon { filter: grayscale(1) brightness(0.5); }
-.deck-card.locked:not(:disabled) { opacity: 0.8; }
+.deck-card.locked:not(.dis) { opacity: 0.85; }
 .deck-card.off.nofit { opacity: 0.6; }
 .deck-card.on { border-color: var(--cc); background: linear-gradient(180deg, color-mix(in srgb, var(--cc) 18%, transparent), rgba(0, 0, 0, 0.3));
   box-shadow: 0 0 18px color-mix(in srgb, var(--cc) 45%, transparent), inset 0 0 20px color-mix(in srgb, var(--cc) 15%, transparent); }
@@ -300,3 +300,21 @@ input[type=checkbox] { pointer-events: auto; width: 18px; height: 18px; accent-c
 }
 .relic-chip.temp { border-color: var(--gold); border-style: dashed; }
 #hp-text, #ammo-hint, #enemies-left { letter-spacing: 1px; }
+
+/* 同一界面原地刷新时不重放开机动画（装备卡牌时不闪屏） */
+.overlay.instant .card { animation: none; }
+.core-txt { color: #ff7ad9; font-weight: 700; text-shadow: 0 0 8px rgba(255, 122, 217, 0.5); }
+.big-num .core-txt small { color: var(--dim); }
+.deck-card { user-select: none; }
+.dc-lv { color: var(--cc); font-size: 10px; letter-spacing: 1px; }
+.dc-desc .vals span { color: var(--dim); }
+.dc-desc .vals span.past { color: #6f8f80; }
+.dc-desc .vals span.cur { color: var(--cc); font-weight: 700; text-shadow: 0 0 6px var(--cc); }
+.dc-desc .vals i { font-style: normal; color: #2f5a46; margin: 0 1px; }
+.dc-foot { display: flex; justify-content: space-between; align-items: center; gap: 4px; }
+.dc-up { pointer-events: auto; cursor: pointer; font-size: 11px; padding: 1px 6px; border: 1px solid var(--line-hi); border-radius: 2px;
+  background: rgba(57, 255, 159, 0.06); color: var(--text); }
+.dc-up:hover:not(:disabled) { border-color: var(--accent); background: rgba(57, 255, 159, 0.2); }
+.dc-up:disabled { opacity: 0.35; cursor: not-allowed; }
+.dc-max { font-size: 11px; color: var(--cc); }
+.deck-card.inrun { border-style: dashed; border-color: var(--cc); }

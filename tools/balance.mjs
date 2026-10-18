@@ -26,8 +26,8 @@ async function playOne(i) {
   await page.evaluate(({ sk, school, style }) => {
     game.timeScale = 4;
     if (school) {
-      // 解锁命盘全部卡牌（不装备），携带对应流派遗物
-      game.save.deck.unlocked = CARDS.map((c) => c.id);
+      // 解锁命盘全部普通卡（不装备，觉醒卡不解锁），携带对应流派遗物
+      game.save.deck.unlocked = CARDS.filter((c) => c.cat !== 'wake').map((c) => c.id);
       const ks = { head: 'hunter', spray: 'drum', time: 'watch' }[school];
       game.save.keepsake = ks || null;
     }

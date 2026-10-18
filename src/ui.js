@@ -1,7 +1,7 @@
 // DOM 界面：HUD 与各个全屏界面。按钮通过 data-action 统一派发给 game。
 import { UPGRADES, SCHOOLS, CAT_LABEL, BASE_MAX_LEVEL } from './upgrades.js';
-import { KEEPSAKES, BOTS, WAVES, FOCUS, SHOP, SETTLEMENT, WEAPON, WELL, WELL_ITEMS, RATING, CARDS, CARD_CATS, DECK_SIZE, DECK_CAPACITY } from './config.js';
-import { keepsakeLevel, shopStats, cardUnlocked, cardEquipped, cardAwake, deckCapacity, deckUsed, nextCapacityCost, activeCards } from './meta.js';
+import { KEEPSAKES, BOTS, WAVES, FOCUS, SHOP, SETTLEMENT, WEAPON, WELL, WELL_ITEMS, RATING, CARDS, CARD_CATS, DECK_SIZE, DECK_CAPACITY, CARD_MAX_LV, cardValue } from './config.js';
+import { keepsakeLevel, shopStats, cardUnlocked, cardEquipped, wakeState, deckCapacity, deckUsed, nextCapacityCost, activeCards, cardLevel, nextCardUpgrade } from './meta.js';
 import * as R from './run.js';
 import { gameSens, cm360, equivalents, GAME_YAW, FOV_PRESETS } from './sens.js';
 
@@ -18,7 +18,7 @@ export class UI {
     this.radar = $('radar').getContext('2d');
     this.screen.addEventListener('click', (e) => {
       const el = e.target.closest('[data-action]');
-      if (el && !el.disabled) onAction(el.dataset.action, el.dataset);
+      if (el && !el.disabled && !el.classList.contains('dis')) onAction(el.dataset.action, el.dataset);
     });
     this.screen.addEventListener('input', (e) => {
       const t = e.target;
@@ -27,10 +27,17 @@ export class UI {
     this.lastTier = null;
   }
 
-  show(html) {
+  // keep：同一个界面原地刷新（比如在命盘里装备卡牌），不重放开机动画、保留滚动位置，避免闪屏
+  show(html, { keep = false } = {}) {
+    const card = this.screen.querySelector('.card');
+    const scroll = keep && card ? card.scrollTop : 0;
+    const outer = keep ? this.screen.scrollTop : 0;
+    this.screen.classList.toggle('instant', keep && !this.screen.hidden);
     this.screen.innerHTML = html;
     this.screen.hidden = false;
-    this.screen.scrollTop = 0;
+    this.screen.scrollTop = outer;
+    const next = this.screen.querySelector('.card');
+    if (next) next.scrollTop = scroll;
   }
 
   hideScreen() {
@@ -92,8 +99,10 @@ export class UI {
       tuning: () => this.titleTuning(save),
       settings: () => this.titleSettings(save),
     }[tab]();
-    const refund = save.refunded ? `<div class="ok-box">命盘取代了星尘工坊：旧工坊和遗物升级的花费已全部退还，共 <span class="stardust">✦ ${save.refunded}</span>。</div>` : '';
+    const refund = save.refunded ? `<div class="ok-box">存档迁移：旧版工坊、遗物升级和已删除卡牌的花费已全部退还，共 <span class="stardust">✦ ${save.refunded}</span>。</div>` : '';
     save.refunded = 0;
+    const same = this.lastTitleTab === tab && !this.screen.hidden && this.screen.querySelector('.title-card');
+    this.lastTitleTab = tab;
     this.show(`
       <div class="card crt title-card">
         <div class="boot small">&gt; ROGUEAIM.EXE — 瞄准训练终端 v0.2<span class="cursor">█</span></div>
@@ -102,12 +111,12 @@ export class UI {
             <h1 class="logo" data-text="ROGUEAIM">ROGUE<span>AIM</span></h1>
             <div class="subtitle">第一人称纯瞄准 × ROGUELIKE　//　只能转身和开枪</div>
           </div>
-          <div class="stardust big-num">✦ ${save.stardust}<small>星尘</small></div>
+          <div class="big-num"><span class="stardust">✦ ${save.stardust}<small>星尘</small></span>　<span class="core-txt">◆ ${save.cores || 0}<small>星核</small></span></div>
         </div>
         <nav class="menu">${tabs.map(([id, n]) => `<button class="tab ${id === tab ? 'on' : ''}" data-action="tab" data-tab="${id}">${n}</button>`).join('')}</nav>
         ${refund}
         <div class="screen-body">${body}</div>
-      </div>`);
+      </div>`, { keep: !!same });
   }
 
   titlePlay(save) {
@@ -156,46 +165,62 @@ export class UI {
 
   deckSummary(save) {
     const act = activeCards(save);
-    return CARDS.filter((c) => act.has(c.id)).map((c) => `<span style="color:${CARD_CATS[c.cat].color}">${c.icon}</span> ${c.name}`).join('　');
+    return CARDS.filter((c) => act.has(c.id)).map((c) => {
+      const lv = cardLevel(save, c.id);
+      return `<span style="color:${CARD_CATS[c.cat].color}">${c.icon}</span> ${c.name}${lv > 1 ? ` Lv${lv}` : ''}${c.wake === 'rank' ? '（局内觉醒）' : ''}`;
+    }).join('　');
   }
 
-  // 命盘：5×5 卡牌。点击未解锁的卡 = 花星尘解锁；点击已解锁的卡 = 装备 / 卸下
+  // 命盘：5×5 卡牌。点击卡面 = 解锁 / 装备 / 卸下；卡底的按钮 = 升级
   titleDeck(save) {
     const cap = deckCapacity(save);
     const used = deckUsed(save);
     const capCost = nextCapacityCost(save);
+    const cores = save.cores || 0;
     const grid = [];
     for (let r = 0; r < DECK_SIZE; r++) for (let c = 0; c < DECK_SIZE; c++) grid.push(CARDS.find((x) => x.pos[0] === r && x.pos[1] === c));
     const tiles = grid.map((card) => {
       const cat = CARD_CATS[card.cat];
       const unlocked = cardUnlocked(save, card.id);
       const wake = card.cat === 'wake';
-      const on = wake ? cardAwake(save, card) : cardEquipped(save, card.id);
-      const fits = used + card.cost <= cap;
-      let state; let action; let foot;
+      const lv = cardLevel(save, card.id);
+      const fmt = card.fmt || String;
+      // 四个等级的数值，当前等级高亮
+      const vals = card.vals.map((v, k) => `<span class="${unlocked && k + 1 === lv ? 'cur' : k + 1 < lv ? 'past' : ''}">${fmt(v)}</span>`).join('<i>/</i>');
+      const desc = card.desc.replace('{v}', `<span class="vals">${vals}</span>`);
+      let state; let action = ''; let foot; let dis = false;
       if (!unlocked) {
         state = 'locked';
         action = 'unlockCard';
-        foot = `<span class="stardust">✦ ${card.unlock}</span> 解锁`;
+        const needCore = card.coresToUnlock || 0;
+        dis = save.stardust < card.unlock || cores < needCore;
+        foot = `<span class="stardust">✦ ${card.unlock}</span>${needCore ? ` <span class="core-txt">◆ ${needCore}</span>` : ''} 解锁`;
       } else if (wake) {
-        state = on ? 'on awake' : 'dormant';
-        action = '';
-        foot = on ? '已觉醒' : '未觉醒';
+        const st = wakeState(save, card);
+        state = st === 'awake' ? 'on awake' : st === 'inrun' ? 'inrun' : 'dormant';
+        foot = { awake: '已觉醒', inrun: '局内觉醒', dormant: '未觉醒' }[st];
       } else {
+        const on = cardEquipped(save, card.id);
+        const fits = used + card.cost <= cap;
         state = on ? 'on' : fits ? 'off' : 'off nofit';
         action = 'toggleCard';
+        dis = !on && !fits;
         foot = on ? '已装备' : fits ? '点击装备' : '心力不足';
       }
+      const up = unlocked ? nextCardUpgrade(save, card.id) : null;
+      const upBtn = !unlocked ? '' : up
+        ? `<button class="dc-up" data-action="upgradeCard" data-id="${card.id}" ${save.stardust < up.dust || cores < up.cores ? 'disabled' : ''} title="升到 ${lv + 1} 级">▲ <span class="stardust">${up.dust}</span>${up.cores ? ` <span class="core-txt">◆${up.cores}</span>` : ''}</button>`
+        : '<span class="dc-max">满级</span>';
+      const lvPips = unlocked ? `<span class="dc-lv">${'▮'.repeat(lv)}${'▯'.repeat(CARD_MAX_LV - lv)}</span>` : '';
       const pips = wake ? '<span class="pip-wake">0</span>' : '◆'.repeat(card.cost);
-      const disabled = (!unlocked && save.stardust < card.unlock) || (unlocked && wake) ? 'disabled' : '';
-      const extra = [card.needText ? `条件：${card.needText}` : '', card.unlockText || ''].filter(Boolean).map((t) => `<div class="cond">${t}</div>`).join('');
-      return `<button class="deck-card ${state}" style="--cc:${cat.color}" data-action="${action}" data-id="${card.id}" ${disabled}>
-        <div class="dc-top"><span class="dc-cost">${pips}</span><span class="dc-cat">${cat.name}</span></div>
+      const extra = [card.needText, card.unlockText].filter(Boolean).map((t) => `<div class="cond">${t}</div>`).join('');
+      return `<div class="deck-card ${state} ${dis ? 'dis' : ''}" style="--cc:${cat.color}" ${action ? `data-action="${action}"` : ''} data-id="${card.id}">
+        <div class="dc-top"><span class="dc-cost">${pips}</span>${lvPips}<span class="dc-cat">${cat.name}</span></div>
         <div class="dc-icon">${card.icon}</div>
         <div class="dc-name">${card.name}</div>
-        <div class="dc-desc">${card.desc}${extra}</div>
-        <div class="dc-foot">${foot}</div>
-      </button>`;
+        <div class="dc-desc">${desc}${extra}</div>
+        <div class="dc-foot"><span>${foot}</span>${upBtn}</div>
+      </div>`;
     }).join('');
     const ks = KEEPSAKES.map((k) => {
       const own = keepsakeLevel(save, k.id) > 0;
@@ -211,7 +236,8 @@ export class UI {
         </div>
         ${capCost == null ? '<button class="btn" disabled>心力已满</button>' : `<button class="btn" data-action="buyCapacity" ${save.stardust < capCost ? 'disabled' : ''}>心力 +${DECK_CAPACITY.step}　✦ ${capCost}</button>`}
       </div>
-      <p class="small dim">星尘解锁卡牌；装备的卡总消耗（◆）不能超过心力上限。<b style="color:${CARD_CATS.wake.color}">觉醒卡</b>不占心力，解锁后只要相邻的指定卡牌都已装备就自动生效。解锁带「核心」的卡牌会让对应的强化进入奖池（不需要装备）。</p>
+      <p class="small dim">星尘解锁卡牌；装备的卡总消耗（◆）不能超过心力上限——所有卡加起来 ${CARDS.reduce((a, c) => a + c.cost, 0)} 点，心力最多 ${DECK_CAPACITY.base + DECK_CAPACITY.step * DECK_CAPACITY.costs.length}，只能带一半不到。
+        每张卡能升 3 次（▲，第 4 级要 1 个 <span class="core-txt">◆ 星核</span>，每打完一个区域得 1 个）。<b style="color:${CARD_CATS.wake.color}">觉醒卡</b>不占心力，满足各自的条件后自动生效。解锁带「核心」的卡牌会让对应的强化进入奖池（不需要装备）。</p>
       <div class="deck-grid">${tiles}</div>
       <h3>遗物（开局携带 1 个）</h3><div style="display:grid;gap:8px">${ks}</div>`;
   }
@@ -477,8 +503,9 @@ export class UI {
           <tr><td>到达深度 ${summary.waves} 波 × ${SETTLEMENT.perWave}</td><td class="stardust">+${settlement.depth}</td></tr>
           ${summary.victory ? `<tr><td>通关奖励</td><td class="stardust">+${settlement.victory}</td></tr>` : ''}
           ${settlement.blank ? `<tr><td>空白徽章 +25%</td><td class="stardust">+${settlement.blank}</td></tr>` : ''}
-          ${settlement.star ? `<tr><td>星之觉醒 +15%</td><td class="stardust">+${settlement.star}</td></tr>` : ''}
+          ${settlement.star ? `<tr><td>群星觉醒</td><td class="stardust">+${settlement.star}</td></tr>` : ''}
           <tr><td>商店兑换</td><td class="stardust">+${settlement.shop}</td></tr>
+          ${summary.cores ? `<tr><td>打完 ${Math.floor(summary.waves / 5)} 个区域</td><td class="core-txt">◆ +${summary.cores} 星核</td></tr>` : ''}
         </table>
         <h3>本局商店决策</h3>
         ${visits ? `<table><tr><th>商店</th><th>进店生命</th><th>进店金币</th><th>购买</th><th>剩余</th><th>停留</th></tr>${visits}</table>` : '<p class="dim small">本局没有进过商店。</p>'}

@@ -6,7 +6,7 @@ import { Bot } from './bots.js';
 import { UI } from './ui.js';
 import { createWorld } from './world.js';
 import { initAudio, setVolume, sfx } from './audio.js';
-import { loadSave, persist, resetSave, buyKeepsake, selectKeepsake, recordRun, unlockCard, toggleCard, buyCapacity } from './meta.js';
+import { loadSave, persist, resetSave, buyKeepsake, selectKeepsake, recordRun, unlockCard, toggleCard, buyCapacity, upgradeCard } from './meta.js';
 import { CARDS } from './config.js';
 import * as R from './run.js';
 import { SimAimer, SKILLS, STYLES } from './simaim.js';
@@ -150,6 +150,10 @@ export class Game {
         if (toggleCard(this.save, data.id)) sfx.buy(); else sfx.deny();
         this.ui.title(this.save, this.titleTab, this.rawStatus);
         break;
+      case 'upgradeCard':
+        if (upgradeCard(this.save, data.id)) sfx.buy(); else sfx.deny();
+        this.ui.title(this.save, this.titleTab, this.rawStatus);
+        break;
       case 'buyCapacity':
         if (buyCapacity(this.save)) sfx.buy(); else sfx.deny();
         this.ui.title(this.save, this.titleTab, this.rawStatus);
@@ -219,7 +223,7 @@ export class Game {
         // 命运骰：重新抽这一次的三选一
         if (R.useRerollToken(this.run)) {
           sfx.buy();
-          this.showReward(R.rollRewardChoices(this.run, 3, this.rewardInfo.opts), this.rewardInfo.title);
+          this.showReward(R.rollRewardChoices(this.run, this.rewardInfo.n || 3, this.rewardInfo.opts), this.rewardInfo.title);
         } else sfx.deny();
         break;
       case 'buyItem':
@@ -272,20 +276,20 @@ export class Game {
     const run = this.run;
     for (const c of CARDS) {
       const school = { h_badge: 'head', s_badge: 'spray', t_badge: 'time' }[c.id];
-      if (school && R.hasCard(run, c.id)) this.openingPicks.push({ title: `${c.name} · 选择一个${SCHOOLS[school].name}强化`, opts: { school } });
+      if (school && R.hasCard(run, c.id)) this.openingPicks.push({ title: `${c.name} · 选择一个${SCHOOLS[school].name}强化`, opts: { school }, n: R.cv(run, c.id) });
     }
-    if (run.extraChoice) this.openingPicks.push({ title: '开局补给 · 选择一个强化', opts: {} });
+    if (run.extraChoice) this.openingPicks.push({ title: '开局补给 · 选择一个强化', opts: {}, n: R.cv(run, 'e_supply') });
     this.nextOpeningPick();
   }
 
   nextOpeningPick() {
     const next = this.openingPicks.shift();
     if (!next) { this.startWave(); return; }
-    const choices = R.rollRewardChoices(this.run, 3, next.opts);
+    const choices = R.rollRewardChoices(this.run, next.n || 3, next.opts);
     if (!choices.length) { this.nextOpeningPick(); return; }
     this.rewardContext = 'start';
     this.state = 'reward';
-    this.rewardInfo = { title: next.title, opts: next.opts };
+    this.rewardInfo = { title: next.title, opts: next.opts, n: next.n || 3 };
     this.showReward(choices, next.title);
   }
 
@@ -343,7 +347,8 @@ export class Game {
     this.state = 'reward';
     const choices = R.rollRewardChoices(run);
     if (!choices.length) { this.afterReward(); return; }
-    this.rewardInfo = { title: `${WAVES[run.waveIndex - 1].name} 清除 · 选择一个强化`, opts: {} };
+    const gifted = (run.lastGifted || []).map((id) => CARDS.find((c) => c.id === id).name);
+    this.rewardInfo = { title: `${WAVES[run.waveIndex - 1].name} 清除 · 选择一个强化${gifted.length ? `　//　独行激活：${gifted.join('、')}` : ''}`, opts: {} };
     this.showReward(choices, this.rewardInfo.title);
   }
 
@@ -392,7 +397,8 @@ export class Game {
     };
     const perf = settlement.rating + settlement.kills + settlement.depth + settlement.victory;
     if (run.keepsake === 'blank') settlement.blank = Math.round(0.25 * perf);
-    if (R.hasCard(run, 'w_star')) settlement.star = Math.round(0.15 * perf);
+    if (R.hasCard(run, 'w_star')) settlement.star = Math.round((R.cv(run, 'w_star') / 100) * perf);
+    const cores = SETTLEMENT.coresPerRegion * Math.floor(run.waveIndex / 5);
     const stardust = Object.values(settlement).reduce((a, b) => a + b, 0);
     const reactions = this.reactions || [];
     const summary = {
@@ -415,6 +421,8 @@ export class Game {
     };
     this.reactions = [];
     this.save.stardust += stardust;
+    this.save.cores = (this.save.cores || 0) + cores;
+    summary.cores = cores;
     recordRun(this.save, summary, run.shopVisits);
     this.lastSummary = summary;
     this.ui.results(run, summary, settlement);
@@ -491,6 +499,7 @@ export class Game {
     while (this.yawHist.length && this.yawHist[0].t < this.time - 0.4) this.yawHist.shift();
     this.flickReady = R.has(run, 'flickmaster') && this.yawHist.some((h) => Math.abs(h.yaw - this.yaw) >= Math.PI / 3);
     R.tickRating(run, dt);
+    if (run.justAwoke) { run.justAwoke = null; sfx.focus(); this.ui.banner('巅峰 · 觉醒'); }
 
     // 视野检测：用于「甩枪反应」统计
     this.camera.updateMatrixWorld();
@@ -623,7 +632,7 @@ export class Game {
     if (head) {
       d *= R.headMultiplier(run);
       if (R.has(run, 'lethal')) d += 1.5;
-      if (R.hasCard(run, 'h_aim')) d += 0.5;
+      d += R.cv(run, 'h_aim');
       d += execBonus;
       if (R.has(run, 'hawkeye') && bot.distance > 15) d *= 1.5;
       if (flick) d *= 2;
@@ -684,7 +693,7 @@ export class Game {
     const run = this.run;
     let base = bot.def.gold;
     if (ctx.onetap && R.has(run, 'bounty')) base += 2;
-    if (ctx.onetap && R.hasCard(run, 'h_flick')) base += 1;
+    if (ctx.onetap) base *= 1 + R.cv(run, 'h_flick') / 100;
     const glance = ctx.head && R.has(run, 'glance') && bot.offscreenAt != null && this.time - bot.offscreenAt <= 1;
     const gold = R.killGold(run, base, glance ? 2 : 1);
     if (ctx.onetap && R.has(run, 'onetap')) R.refundAmmo(run, 2);

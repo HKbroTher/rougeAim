@@ -155,30 +155,65 @@ const results = await page.evaluate(async () => {
 
   // ---- 命盘 ----
   const meta = await import('./src/meta.js');
+  const cfg = await import('./src/config.js');
   const save0 = JSON.parse(JSON.stringify(g.save));
+  const totalCost = cfg.CARDS.reduce((a, c) => a + c.cost, 0);
+  const maxCap = cfg.DECK_CAPACITY.base + cfg.DECK_CAPACITY.step * cfg.DECK_CAPACITY.costs.length;
+  check('取舍：满心力也装不下一半的卡', maxCap * 2 < totalCost, `${maxCap} / ${totalCost}`);
   g.save.stardust = 5000;
-  g.save.deck = { unlocked: ['v_body', 'h_aim', 's_mag', 't_flow'], active: [], capacityLv: 0 };
-  check('命盘：未解锁的卡不能装备', !meta.toggleCard(g.save, 'v_heart'));
-  check('命盘：解锁花星尘', meta.unlockCard(g.save, 'v_heart') && g.save.stardust === 5000 - 150);
-  for (const id of ['v_shield', 'e_supply', 'e_stake', 'e_fate', 'w_revive']) meta.unlockCard(g.save, id);
-  ['v_heart', 'v_shield', 'e_supply', 'e_stake'].forEach((id) => meta.toggleCard(g.save, id));
-  check('命盘：心力上限 10 装不下第 5 张', !meta.toggleCard(g.save, 'e_fate') && meta.deckUsed(g.save) === 9);
-  meta.buyCapacity(g.save);
-  check('命盘：心力 +2 后可以装备', meta.deckCapacity(g.save) === 12 && meta.toggleCard(g.save, 'e_fate'));
-  check('觉醒卡：四邻都装备 → 不屈生效', meta.activeCards(g.save).has('w_revive'));
-  check('觉醒卡：不能手动装备', !meta.toggleCard(g.save, 'w_revive'));
+  g.save.cores = 0;
+  g.save.deck = { unlocked: ['v_body', 'h_aim', 's_mag', 't_flow'], active: [], levels: {}, capacityLv: 0 };
+  check('命盘：未解锁的卡不能装备', !meta.toggleCard(g.save, 'v_death'));
+  check('命盘：解锁花星尘', meta.unlockCard(g.save, 'v_death') && g.save.stardust === 5000 - 150);
+  check('觉醒卡解锁要星核', !meta.unlockCard(g.save, 'w_full'));
+  g.save.cores = 10;
+  for (const id of ['v_shield', 'e_supply', 'e_stake', 'e_fate', 'w_full', 'w_few', 'w_star', 'w_rank', 'h_pierce', 's_heat', 'v_aid', 'e_star']) meta.unlockCard(g.save, id);
+  // 升级
+  check('升级：1 → 2 级花星尘', meta.upgradeCard(g.save, 'v_body') && meta.cardLevel(g.save, 'v_body') === 2);
+  meta.upgradeCard(g.save, 'v_body');
+  const coresBefore = g.save.cores;
+  check('升级：第 4 级要 1 个星核', meta.upgradeCard(g.save, 'v_body') && g.save.cores === coresBefore - 1 && meta.cardLevel(g.save, 'v_body') === 4);
+  check('升级：最多 4 级', !meta.upgradeCard(g.save, 'v_body'));
+  // 觉醒：独行（≤4 张）
+  ['v_body', 'v_death', 'e_stake', 'v_shield'].forEach((id) => meta.toggleCard(g.save, id));
+  check('独行：装备 ≤4 张时觉醒', meta.wakeState(g.save, meta.cardById('w_few')) === 'awake');
+  check('满盘：用了 8/10 心力不觉醒', meta.wakeState(g.save, meta.cardById('w_full')) === 'dormant');
+  meta.toggleCard(g.save, 'e_fate');
+  check('满盘：恰好用满 10/10 觉醒', meta.deckUsed(g.save) === 10 && meta.wakeState(g.save, meta.cardById('w_full')) === 'awake');
+  check('独行：第 5 张装上就失效', meta.wakeState(g.save, meta.cardById('w_few')) === 'dormant');
+  check('觉醒卡：不能手动装备', !meta.toggleCard(g.save, 'w_full'));
+  check('巅峰：局外显示为局内觉醒', meta.wakeState(g.save, meta.cardById('w_rank')) === 'inrun');
+  check('群星：没覆盖五类不觉醒', meta.wakeState(g.save, meta.cardById('w_star')) === 'dormant');
   run = fresh({});
-  check('卡牌生效：生命 +30、护盾 1、金币 25、骰子 +1', run.maxHp === 130 && run.shield === 1 && run.gold === 25 && run.rerolls === 3);
+  check('卡牌按等级生效：生命 +30（4 级）、护盾 1、金币 25、骰子 +1', run.maxHp === 130 && run.shield === 1 && run.gold === 25 && run.rerolls === 3, `${run.maxHp} ${run.shield} ${run.gold} ${run.rerolls}`);
   run.shield = 0;
   run.hp = 5;
   const res = R.takeDamage(run, 50);
-  check('不屈：致命伤害复活到 50%（一局一次）', res.revived && run.hp === 65);
+  check('死亡抗拒：致命伤害复活到 30%（一局一次）', res.revived && run.hp === 39, run.hp);
   run.hp = 5;
-  check('不屈：第二次照常死亡', R.takeDamage(run, 50).dead);
-  meta.toggleCard(g.save, 'v_shield');
-  check('觉醒卡：卸下一张邻卡就失效', !meta.activeCards(g.save).has('w_revive'));
-  g.save.deck.unlocked.push('h_pierce');
-  check('解锁卡牌即把核心加入奖池', meta.unlockedUpgrades(g.save).includes('pierce'));
+  check('死亡抗拒：第二次照常死亡', R.takeDamage(run, 50).dead);
+  run = fresh({});
+  run.hp = 50;
+  R.startWave(run);
+  check('满盘：每波护盾补到 1 并回复 2', run.shield >= 1 && run.hp === 52);
+  // 巅峰：局内达到 S 才觉醒
+  run = fresh({});
+  run.rating = { tier: 3, points: 0, idle: 0, peak: 3 };
+  check('巅峰：没到 S 前不加金币', R.killGold(run, 10) === 17);
+  R.onDamage(run, 60, false);
+  check('巅峰：评级到 S 觉醒', run.rankAwake && run.rating.tier === 4);
+  check('巅峰：觉醒后金币 +10%', R.killGold(run, 10) === Math.round(10 * 2 * 1.1));
+  R.takeDamage(run, 1); R.takeDamage(run, 1);
+  check('巅峰：掉到 A 以下立刻回到 A（每波一次）', run.rating.tier === 3, run.rating.tier);
+  // 独行：区域结束随机激活卡
+  ['e_fate'].forEach((id) => meta.toggleCard(g.save, id));
+  run = fresh({});
+  const had = run.cards.size;
+  run.waveIndex = 4;
+  R.finishWave(run);
+  check('独行：打完区域激活 1 张没带的卡', run.cards.size === had + 1 && run.lastGifted.length === 1 && !cfg.CARDS.find((c) => c.id === run.lastGifted[0]).opening, run.lastGifted);
+  g.save.deck.unlocked.push('h_flick');
+  check('解锁卡牌即把核心加入奖池', meta.unlockedUpgrades(g.save).includes('pierce') && meta.unlockedUpgrades(g.save).includes('flickmaster'));
   Object.assign(g.save, save0);
   // 旧存档迁移：工坊花费和遗物升级退还星尘
   localStorage.setItem('rougeaim.save.v1', JSON.stringify({ stardust: 10, upgrades: { vitality: 2, unlock_pierce: 1 }, keepsakes: { hunter: 3, drum: 1, watch: 1, prism: 1 }, settings: { volume: 0.3 } }));
