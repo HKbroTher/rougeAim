@@ -109,7 +109,8 @@ export function shopStats(log) {
     saved += v.goldOut;
     const kinds = new Set();
     for (const p of v.purchases) {
-      const kind = p.kind === 'relic' ? 'upgrade' : p.kind; // 兼容旧存档
+      // 护盾算进生存开销，刷新算进强化开销；relic 为旧存档的叫法
+      const kind = { relic: 'upgrade', reroll: 'upgrade', shield: 'heal' }[p.kind] || p.kind;
       spend[kind] += p.price;
       kinds.add(kind);
     }

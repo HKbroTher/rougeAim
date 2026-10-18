@@ -153,6 +153,41 @@ const results = await page.evaluate(async () => {
   for (let i = 0; i < 100; i++) if (R.rollRewardChoices(run).some((id) => UPGRADES[id].school === 'time')) guaranteed++;
   check('怀表 2 级：第一次三选一保底子弹时间流', guaranteed === 100, guaranteed);
 
+  // ---- 商人 ----
+  run = fresh({});
+  run.waveIndex = 1;
+  run.wavesSinceMerchant = 5;
+  check('第 2 波之前不出商人', R.merchantChance(run) === 0);
+  run.waveIndex = 4;
+  run.wavesSinceMerchant = 2;
+  check('商人概率 0.2 × 距上次波数', Math.abs(R.merchantChance(run) - 0.4) < 1e-9);
+  let distinct = 0;
+  for (let i = 0; i < 50; i++) { run.wavesSinceMerchant = 10; const ev = R.rollMerchantEvent(run); if (ev && ev.length === 2 && ev[0] !== ev[1]) distinct++; }
+  check('商人事件给出两位不同的商人', distinct === 50, distinct);
+  run = fresh({}, { gold: 1000 });
+  run.waveIndex = 3;
+  let shop = R.openShop(run, 'blacksmith');
+  check('铁匠只卖基础强化', shop.items.every((it) => UPGRADES[it.id].cat === 'base'), shop.items.map((x) => x.id));
+  check('铁匠 8 折', R.upgradePrice(run, shop.items[0].id, 'blacksmith') === Math.round(R.upgradePrice(run, shop.items[0].id) * 0.8));
+  shop = R.openShop(run, 'blackmarket');
+  R.buyItem(run, shop, 0);
+  const soldId = shop.items[0].id;
+  const p1 = R.rerollPrice(run, shop);
+  R.reroll(run, shop);
+  check('刷新：已买的格子保留', shop.items[0].id === soldId && shop.items[0].sold);
+  check('刷新：每次涨价', R.rerollPrice(run, shop) > p1, `${p1} → ${R.rerollPrice(run, shop)}`);
+  run = fresh({}, { gold: 1000, hp: 20 });
+  run.waveIndex = 3;
+  shop = R.openShop(run, 'doctor');
+  R.buyService(run, shop, 1);
+  check('医生：回满生命且限一次', run.hp === run.maxHp && shop.services[1].sold);
+  run = fresh({}, { gold: 1000 });
+  run.waveIndex = 3;
+  shop = R.openShop(run, 'stardust');
+  const y = R.stardustYield(run);
+  R.buyService(run, shop, 1);
+  check('星尘商：大宗兑换 2.2 倍', run.stardustFromShop === Math.round(y * 2.2), run.stardustFromShop);
+
   // ---- 场景：穿颅弹 ----
   run = fresh({ pierce: 1 });
   g.clearBots();

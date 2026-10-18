@@ -201,14 +201,22 @@ export class Game {
       case 'skipReward':
         this.afterReward();
         break;
-      case 'buyHeal':
-        this.shopResult(R.buyHeal(this.run, this.shop));
+      case 'visitMerchant':
+        this.state = 'shop';
+        this.shop = R.openShop(this.run, data.id);
+        this.ui.shop(this.run, this.shop);
+        break;
+      case 'skipMerchant':
+        this.startWave();
+        break;
+      case 'buyService':
+        this.shopResult(R.buyService(this.run, this.shop, Number(data.slot)));
+        break;
+      case 'reroll':
+        this.shopResult(R.reroll(this.run, this.shop));
         break;
       case 'buyItem':
         this.shopResult(R.buyItem(this.run, this.shop, Number(data.slot)));
-        break;
-      case 'buyStardust':
-        this.shopResult(R.buyStardust(this.run, this.shop));
         break;
       case 'leaveShop':
         R.closeShop(this.run, this.shop);
@@ -337,10 +345,11 @@ export class Game {
       return;
     }
     this.run.rewardsTaken++;
-    if (!R.shopAfterWave(this.run)) { this.startWave(); return; }
-    this.state = 'shop';
-    this.shop = R.openShop(this.run);
-    this.ui.shop(this.run, this.shop);
+    // 商人事件：随机出现两位商人，选一位拜访
+    const merchants = R.rollMerchantEvent(this.run);
+    if (!merchants) { this.startWave(); return; }
+    this.state = 'merchant';
+    this.ui.merchantChoice(this.run, merchants);
   }
 
   pause() {
@@ -647,7 +656,7 @@ export class Game {
   killBot(bot, ctx = {}) {
     if (bot.dead) return;
     const run = this.run;
-    let base = bot.def.gold + (MOVEMENT.goldBonus[bot.move.mode] || 0);
+    let base = bot.def.gold;
     if (ctx.onetap && R.has(run, 'bounty')) base += 2;
     const glance = ctx.head && R.has(run, 'glance') && bot.offscreenAt != null && this.time - bot.offscreenAt <= 1;
     const gold = R.killGold(run, base, glance ? 2 : 1);

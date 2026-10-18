@@ -1,5 +1,5 @@
 // 单局状态与规则（不依赖渲染，便于单测和平衡模拟）。
-import { PLAYER, WEAPON, COMBO, FOCUS, SHOP, WAVES, KEEPSAKES } from './config.js';
+import { PLAYER, WEAPON, COMBO, FOCUS, SHOP, WAVES, KEEPSAKES, MERCHANTS, MERCHANT_EVENT } from './config.js';
 import { UPGRADES, BASE_MAX_LEVEL } from './upgrades.js';
 import { upgradeLevel, unlockedUpgrades, keepsakeLevel } from './meta.js';
 
@@ -34,6 +34,7 @@ export function createRun(save) {
     extraChoice: upgradeLevel(save, 'extraChoice') > 0,
     waveIndex: 0,
     wavesSinceCore: 0,
+    wavesSinceMerchant: 0,
     rewardsTaken: 0,
     healBuys: 0,
     stardustBuys: 0,
@@ -446,12 +447,13 @@ export function addUpgrade(run, id) {
   if (id === 'mag' || id === 'drum') run.ammo = magSize(run);
 }
 
-// ---------------- 商店 ----------------
+// ---------------- 商人 ----------------
+// 波次之间随机出现商人事件：给出两位不同的商人，玩家选一位拜访（也可以不拜访）。
+// 铁匠卖基础强化、黑市卖流派 / 核心强化、医生卖治疗、星尘商卖星尘；铁匠和黑市可以花金币刷新货架。
 
-// 价格随深度平滑上涨，与每波收入增长同步
-// 第 k 家商店（每 3 波一家）价格 × k
+// 价格随深度增长：第 3 波后为 1 倍，之后每 3 波 +1 倍（与收入增长同步）
 export function priceScale(run) {
-  return Math.max(1, run.waveIndex / SHOP.every);
+  return Math.max(1, run.waveIndex / 3);
 }
 
 export function healPrice(run) {
@@ -463,15 +465,12 @@ export function healAmount(run) {
   return SHOP.healAmount + (has(run, 'clinic') ? 10 : 0);
 }
 
-export function upgradePrice(run, id) {
+export function upgradePrice(run, id, merchant = null) {
   const u = UPGRADES[id];
   const P = SHOP.upgradePrice;
   const base = u.cat === 'base' ? P.base + P.baseStep * lv(run, id) : P[u.cat];
-  return Math.round(base * priceScale(run) * (has(run, 'membercard') ? SHOP.discount : 1));
-}
-
-export function shopSellsStardust(shopNumber) {
-  return SHOP.stardustShops == null || SHOP.stardustShops.includes(shopNumber);
+  const m = merchant ? MERCHANTS[merchant].priceMul || 1 : 1;
+  return Math.round(base * priceScale(run) * m * (has(run, 'membercard') ? SHOP.discount : 1));
 }
 
 export function stardustPrice(run) {
@@ -479,59 +478,99 @@ export function stardustPrice(run) {
 }
 
 export function stardustYield(run) {
-  // 兑换量随商店深度增长得比价格快，越深越划算
+  // 兑换量随深度增长得比价格快，越深越划算
   const k = priceScale(run);
   const y = SHOP.stardustYieldBase * k * (1 + SHOP.stardustDepthBonus * (k - 1));
   return Math.round(y * (has(run, 'starmap') ? 1.3 : 1));
 }
 
-// 商店货架：3 个强化（流派 60% / 基础 25% / 通用 15%，每格有概率换成核心），第 3 格可能换成经济强化
-function rollShopItems(run) {
+export function rerollPrice(run, shop) {
+  return Math.round((SHOP.reroll.base + SHOP.reroll.step * shop.rerolls) * priceScale(run));
+}
+
+// 这一波打完之后有没有商人事件：保底机制，越久没遇到越容易遇到
+export function merchantChance(run) {
+  if (run.waveIndex < MERCHANT_EVENT.from) return 0;
+  return Math.min(1, MERCHANT_EVENT.base + MERCHANT_EVENT.perWave * run.wavesSinceMerchant);
+}
+
+export function rollMerchantEvent(run) {
+  run.wavesSinceMerchant++;
+  if (Math.random() >= merchantChance(run)) return null;
+  run.wavesSinceMerchant = 0;
+  const bag = Object.entries(MERCHANTS).map(([id, m]) => ({ id, w: m.weight }));
+  const out = [];
+  while (out.length < MERCHANT_EVENT.choices && bag.length) {
+    let r = Math.random() * bag.reduce((x, b) => x + b.w, 0);
+    let i = 0;
+    for (; i < bag.length - 1; i++) { r -= bag[i].w; if (r <= 0) break; }
+    out.push(bag[i].id);
+    bag.splice(i, 1);
+  }
+  return out;
+}
+
+// 货架：黑市 = 流派 / 通用 / 核心；铁匠 = 基础强化（不够时用通用补）
+function rollMerchantItems(run, merchant) {
   const ids = [];
   for (let i = 0; i < SHOP.slots; i++) {
     let id = null;
-    if (i === SHOP.slots - 1 && Math.random() < SHOP.econChance) id = pickOne(poolOf(run, (u) => u.cat === 'econ'));
-    if (!id && Math.random() < SHOP.coreInShop) id = rollKind(run, 'core', ids);
-    if (!id) {
-      const r = Math.random();
-      const kind = r < 0.6 ? 'school' : r < 0.85 ? 'base' : 'general';
-      id = rollKind(run, kind, ids) || rollKind(run, 'school', ids) || rollKind(run, 'base', ids);
+    if (merchant === 'blackmarket') {
+      if (i === SHOP.slots - 1 && Math.random() < SHOP.econChance) id = pickOne(poolOf(run, (u) => u.cat === 'econ'));
+      if (!id && Math.random() < SHOP.coreInShop) id = rollKind(run, 'core', ids);
+      if (!id) id = rollKind(run, Math.random() < 0.75 ? 'school' : 'general', ids) || rollKind(run, 'school', ids) || rollKind(run, 'general', ids);
+    } else {
+      id = rollKind(run, 'base', ids) || rollKind(run, 'general', ids);
     }
-    if (id) ids.push(id);
+    if (id && !ids.includes(id)) ids.push(id);
   }
   return ids;
 }
 
-// 这一波打完之后有没有商店
-export function shopAfterWave(run) {
-  return run.waveIndex % SHOP.every === 0;
+// 医生、星尘商的服务
+function merchantServices(run, merchant) {
+  if (merchant === 'doctor') return [{ kind: 'heal' }, { kind: 'fullheal' }, { kind: 'shield' }];
+  if (merchant === 'stardust') return [{ kind: 'stardust' }, { kind: 'stardustBulk' }];
+  return [];
 }
 
-export function openShop(run) {
+export function servicePrice(run, svc) {
+  const k = priceScale(run);
+  if (svc.kind === 'heal') return healPrice(run);
+  if (svc.kind === 'fullheal') return Math.round(healPrice(run) * SHOP.fullHealMul);
+  if (svc.kind === 'shield') return Math.round(SHOP.shieldPrice * k);
+  if (svc.kind === 'stardust') return stardustPrice(run);
+  if (svc.kind === 'stardustBulk') return Math.round(stardustPrice(run) * SHOP.bulkPriceMul);
+  return 0;
+}
+
+export function openShop(run, merchant) {
   run.shopCount++;
-  const ids = rollShopItems(run);
-  const shop = {
+  const ids = MERCHANTS[merchant].sellsUpgrades ? rollMerchantItems(run, merchant) : [];
+  const services = merchantServices(run, merchant);
+  return {
     number: run.shopCount,
+    merchant,
     items: ids.map((id) => ({ id, sold: false })),
-    sellsStardust: shopSellsStardust(run.shopCount),
+    services: services.map((s) => ({ ...s, sold: false })),
+    rerolls: 0,
     openedAt: performance.now(),
     visit: {
       wave: run.waveIndex,
       shop: run.shopCount,
+      merchant,
       goldIn: run.gold,
       hpIn: run.hp,
       maxHp: run.maxHp,
       offered: {
-        heal: healPrice(run),
-        items: ids.map((id) => upgradePrice(run, id)),
-        stardust: shopSellsStardust(run.shopCount) ? stardustPrice(run) : null,
+        items: ids.map((id) => upgradePrice(run, id, merchant)),
+        services: services.map((s) => servicePrice(run, s)),
       },
       purchases: [],
       goldOut: 0,
       timeMs: 0,
     },
   };
-  return shop;
 }
 
 function spend(run, shop, kind, price, extra = {}) {
@@ -539,19 +578,10 @@ function spend(run, shop, kind, price, extra = {}) {
   shop.visit.purchases.push({ kind, price, t: Math.round(performance.now() - shop.openedAt), ...extra });
 }
 
-export function buyHeal(run, shop) {
-  const price = healPrice(run);
-  if (run.gold < price || run.hp >= run.maxHp) return false;
-  spend(run, shop, 'heal', price, { hpBefore: run.hp });
-  run.hp = Math.min(run.maxHp, run.hp + healAmount(run));
-  run.healBuys++;
-  return true;
-}
-
 export function buyItem(run, shop, slot) {
   const item = shop.items[slot];
   if (!item || item.sold) return false;
-  const price = upgradePrice(run, item.id);
+  const price = upgradePrice(run, item.id, shop.merchant);
   if (run.gold < price) return false;
   spend(run, shop, 'upgrade', price, { id: item.id });
   item.sold = true;
@@ -559,15 +589,52 @@ export function buyItem(run, shop, slot) {
   return true;
 }
 
-export function buyStardust(run, shop) {
-  if (!shop.sellsStardust) return false;
-  const price = stardustPrice(run);
+export function canBuyService(run, shop, i) {
+  const svc = shop.services[i];
+  if (!svc || svc.sold) return false;
+  if ((svc.kind === 'heal' || svc.kind === 'fullheal') && run.hp >= run.maxHp) return false;
+  return run.gold >= servicePrice(run, svc);
+}
+
+export function buyService(run, shop, i) {
+  if (!canBuyService(run, shop, i)) return false;
+  const svc = shop.services[i];
+  const price = servicePrice(run, svc);
+  if (svc.kind === 'heal') {
+    spend(run, shop, 'heal', price, { hpBefore: run.hp });
+    run.hp = Math.min(run.maxHp, run.hp + healAmount(run));
+    run.healBuys++;
+  } else if (svc.kind === 'fullheal') {
+    spend(run, shop, 'heal', price, { hpBefore: run.hp, full: true });
+    run.hp = run.maxHp;
+    run.healBuys++;
+    svc.sold = true;
+  } else if (svc.kind === 'shield') {
+    spend(run, shop, 'shield', price);
+    run.shield++;
+    svc.sold = true;
+  } else {
+    const bulk = svc.kind === 'stardustBulk';
+    const amount = Math.round(stardustYield(run) * (bulk ? SHOP.bulkYieldMul : 1));
+    spend(run, shop, 'stardust', price, { amount });
+    run.stardustBuys++;
+    run.stardustFromShop += amount;
+    if (bulk) svc.sold = true;
+  }
+  return true;
+}
+
+// 刷新货架（只刷新没卖掉的格子），每次刷新价格上涨
+export function reroll(run, shop) {
+  if (!MERCHANTS[shop.merchant].sellsUpgrades) return false;
+  const price = rerollPrice(run, shop);
   if (run.gold < price) return false;
-  const amount = stardustYield(run);
-  spend(run, shop, 'stardust', price, { amount });
-  run.stardustBuys++;
-  run.stardustFromShop += amount;
-  return amount;
+  spend(run, shop, 'reroll', price);
+  shop.rerolls++;
+  const keep = shop.items.filter((it) => it.sold).map((it) => it.id);
+  const fresh = rollMerchantItems(run, shop.merchant).filter((id) => !keep.includes(id));
+  shop.items = shop.items.map((it) => (it.sold ? it : { id: fresh.shift() || it.id, sold: false }));
+  return true;
 }
 
 export function closeShop(run, shop) {

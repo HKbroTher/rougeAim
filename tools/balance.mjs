@@ -43,21 +43,38 @@ async function playOne(i) {
         const pool = pref.length ? pref : btns;
         pool[Math.floor(Math.random() * pool.length)].click();
       });
-    } else if (state === 'shop') {
-      // 简单的「普通玩家」购物策略：血量 < 60% 先回血，然后买得起的强化，钱多再换星尘
+    } else if (state === 'merchant') {
+      // 选商人：血量低先找医生，其次黑市（流派）/ 铁匠，最后星尘商
       await page.evaluate(() => {
         const r = game.run;
-        const click = (sel) => { const b = document.querySelector(sel); if (b && !b.disabled) { b.click(); return true; } return false; };
-        for (let k = 0; k < 4 && r.hp / r.maxHp < 0.6; k++) if (!click('[data-action=buyHeal]')) break;
-        // 能买几个买几个：优先本流派，其次基础，最后随便
-        for (let k = 0; k < 3; k++) {
-          const items = [...document.querySelectorAll('[data-action=buyItem]')].filter((b) => !b.disabled);
-          const want = items.find((b) => b.dataset.school === window.__school) || items.find((b) => b.dataset.cat === 'base') || items[0];
-          if (!want) break;
-          want.click();
+        const opts = [...document.querySelectorAll('[data-action=visitMerchant]')].map((b) => b.dataset.id);
+        const order = r.hp / r.maxHp < 0.55 ? ['doctor', 'blackmarket', 'blacksmith', 'stardust'] : ['blackmarket', 'blacksmith', 'doctor', 'stardust'];
+        const pick = order.find((id) => opts.includes(id));
+        game.onAction('visitMerchant', { id: pick });
+      });
+    } else if (state === 'shop') {
+      // 简单的「普通玩家」购物策略：医生处治疗到 70%；铁匠 / 黑市能买几个买几个（优先本流派），
+      // 没有想要的且钱多就刷新一次；星尘商有余钱就兑换
+      await page.evaluate(() => {
+        const r = game.run;
+        const q = (sel) => [...document.querySelectorAll(sel)].filter((b) => !b.disabled);
+        for (let k = 0; k < 4 && r.hp / r.maxHp < 0.7; k++) {
+          const h = q('[data-action=buyService][data-kind=heal]')[0] || (r.hp / r.maxHp < 0.4 && q('[data-action=buyService][data-kind=fullheal]')[0]);
+          if (!h) break;
+          h.click();
         }
-        const sd = document.querySelector('[data-action=buyStardust]');
-        if (sd && !sd.disabled && r.gold > 1.6 * Number(sd.querySelector('.price').textContent.replace(/\D/g, ''))) sd.click();
+        const sh = q('[data-action=buyService][data-kind=shield]')[0];
+        if (sh) sh.click();
+        let rerolled = false;
+        for (let k = 0; k < 4; k++) {
+          const items = q('[data-action=buyItem]');
+          const want = items.find((b) => b.dataset.school === window.__school) || items.find((b) => b.dataset.cat === 'base') || items[0];
+          if (want) { want.click(); continue; }
+          const rr = q('[data-action=reroll]')[0];
+          if (!rerolled && rr && document.querySelectorAll('[data-action=buyItem]:not(.sold)').length) { rr.click(); rerolled = true; continue; }
+          break;
+        }
+        for (const kind of ['stardustBulk', 'stardust']) { const b = q(`[data-action=buyService][data-kind=${kind}]`)[0]; if (b) b.click(); }
         game.onAction('leaveShop', {});
       });
     }
@@ -77,7 +94,7 @@ async function playOne(i) {
         acc: w.end && w.end.shots - w.start.shots ? (w.end.hits - w.start.hits) / (w.end.shots - w.start.shots) : null,
         gold: w.end ? w.end.gold - w.start.gold : 0,
       })),
-      shops: r.shopVisits.map((v) => ({ goldIn: v.goldIn, bought: v.purchases.filter((p) => p.kind === 'upgrade').length, left: v.goldOut, prices: v.offered.items })),
+      shops: r.shopVisits.map((v) => ({ merchant: v.merchant, wave: v.wave, goldIn: v.goldIn, bought: v.purchases.filter((p) => p.kind === 'upgrade').length, left: v.goldOut, prices: v.offered.items })),
     };
   });
   await ctx.close();
@@ -108,12 +125,16 @@ const hurt = {};
 for (const r of results) for (const [k, v] of Object.entries(r.hurtBy)) hurt[k] = (hurt[k] || 0) + v;
 const hurtTotal = Object.values(hurt).reduce((a, b) => a + b, 0) || 1;
 console.log(`被碰到的来源（共 ${hurtTotal} 次）：${Object.entries(hurt).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${Math.round((v / hurtTotal) * 100)}%`).join('，')}`);
-// 商店：每家店进店金币、买了几个强化、剩多少、货架均价
+// 商人：按拜访顺序统计；「可买」只对铁匠 / 黑市有意义
 const byShop = {};
 for (const r of results) r.shops.forEach((sh, i) => { (byShop[i + 1] ||= []).push(sh); });
 for (const [n, arr] of Object.entries(byShop)) {
-  const avgPrice = avg(arr.flatMap((x) => x.prices));
-  console.log(`商店 ${n}（${arr.length} 局）：进店金币 ${avg(arr.map((x) => x.goldIn)).toFixed(0)}，货架均价 ${avgPrice.toFixed(0)}，可买 ${(avg(arr.map((x) => x.goldIn)) / avgPrice).toFixed(2)} 个，实际买 ${avg(arr.map((x) => x.bought)).toFixed(2)} 个，剩 ${avg(arr.map((x) => x.left)).toFixed(0)}`);
+  const up = arr.filter((x) => x.prices.length);
+  const avgPrice = avg(up.flatMap((x) => x.prices));
+  const types = {};
+  for (const x of arr) types[x.merchant] = (types[x.merchant] || 0) + 1;
+  console.log(`第 ${n} 次商人（${arr.length} 局，平均第 ${avg(arr.map((x) => x.wave)).toFixed(1)} 波后，${Object.entries(types).map(([k, v]) => `${k}×${v}`).join(' ')}）：进店金币 ${avg(arr.map((x) => x.goldIn)).toFixed(0)}` +
+    (up.length ? `，强化均价 ${avgPrice.toFixed(0)}，可买 ${(avg(up.map((x) => x.goldIn)) / avgPrice).toFixed(2)} 个，实际买 ${avg(up.map((x) => x.bought)).toFixed(2)} 个` : '') + `，剩 ${avg(arr.map((x) => x.left)).toFixed(0)}`);
 }
 console.log('\n波 | 到达局数 | 平均掉血 | 平均命中 | 平均收入');
 for (let w = 1; w <= 20; w++) {

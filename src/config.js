@@ -119,7 +119,6 @@ export const MOVEMENT = {
   stutter: { walkMin: 0.5, walkMax: 1.2, stopMin: 0.45, stopMax: 0.8, stopSpeed: 0.1, windup: 0.18, sprint: 0.55, sprintSpeed: 2.6 },
   // 扑击（冲锋兵）：冲到 distMin–distMax 米时停下发红光 windup 秒，然后以 speed 倍速扑过来
   lunge: { distMin: 7, distMax: 11, windup: 0.55, speed: 2.0 },
-  goldBonus: { sine: 1, jump: 1, adad: 2, dodge: 2, orbit: 1, stutter: 1, lunge: 1 }, // 机动目标更难打，多给金币
 };
 
 function makeWave(n) {
@@ -189,26 +188,43 @@ export function rollMove(wave, type) {
 }
 
 export const SHOP = {
-  // 回血：价格随本局购买次数上涨
+  // 价格：下面是第 3 波前后的价格，之后每 3 波 +1 倍（与收入增长同步）
+  // 目标：两次商人之间攒下的金币，普通玩家大约买 2 个强化，高手买 2 个还有剩
+  upgradePrice: { base: 55, baseStep: 18, school: 72, general: 64, econ: 55, core: 118 },
+  slots: 3,              // 铁匠 / 黑市的货架数
+  coreInShop: 0.2,       // 黑市每个货架换成核心的概率
+  econChance: 0.25,      // 黑市第 3 个货架换成经济强化的概率
+  reroll: { base: 15, step: 15 }, // 刷新货架：15、30、45……（× 深度倍数）
+  discount: 0.8,         // 「会员卡」折扣
+  // 医生
   healAmount: 30,
   healBasePrice: 40,
-  healPriceStep: 20,
-  // 强化：按类别定价；基础强化每升一级 +baseStep
-  // 第 1 家店的价格；第 k 家店 × k（与每 3 波的收入增长同步）。目标：3 波的金币普通玩家买 2 个，高手买 2 个还有剩
-  upgradePrice: { base: 60, baseStep: 20, school: 80, general: 70, econ: 60, core: 130 },
-  every: 3,              // 每 3 波开一次商店（其余波次只有免费三选一）
-  slots: 3,              // 强化货架数（流派 / 基础 / 通用混合）
-  coreInShop: 0.1,       // 每个货架换成核心的概率
-  econChance: 0.25,      // 第 3 个货架换成经济强化的概率
-  // 星尘：比同档强化贵，同一局越买越贵，越深的商店兑换越多
+  healPriceStep: 20,     // 每买一次治疗涨价（整局累计）
+  fullHealMul: 2.2,      // 回满 = 治疗价 × 2.2，每次拜访限一次
+  shieldPrice: 45,       // 护盾 +1，每次拜访限一次
+  // 星尘商：比同档强化贵，同一局越买越贵，越深兑换越多
   stardustBasePrice: 70,
   stardustPriceStep: 30,
-  stardustYieldBase: 30,       // 第 1 家店的兑换量；第 k 家店 × k × (1 + 0.12 × (k − 1))，越深兑换比例越好
+  stardustYieldBase: 30,
   stardustDepthBonus: 0.12,
-  // 哪些商店卖星尘（按商店序号，从 1 开始）。设为 null 表示全部商店都卖。
-  stardustShops: null,
-  discount: 0.8, // 「会员卡」折扣
+  bulkPriceMul: 1.7,     // 大宗兑换：1.7 倍价格换 2.2 倍星尘，每次拜访限一次
+  bulkYieldMul: 2.2,
 };
+
+// 商人：波次之间随机出现，一次给出两位不同的商人，选一位拜访
+export const MERCHANTS = {
+  blacksmith: { name: '铁匠', icon: '⚒', weight: 1, sellsUpgrades: true, priceMul: 0.8,
+    desc: '基础强化 8 折（可升级已有的），可花金币刷新货架。' },
+  blackmarket: { name: '黑市商人', icon: '🕶', weight: 1.2, sellsUpgrades: true,
+    desc: '流派强化、通用强化，较高概率出现核心强化，可花金币刷新货架。' },
+  doctor: { name: '医生', icon: '⚕', weight: 1,
+    desc: '治疗 +30、回满生命、护盾 +1。' },
+  stardust: { name: '星尘商', icon: '✦', weight: 0.7,
+    desc: '用金币兑换星尘（局外货币），越深越划算。' },
+};
+
+// 商人事件：第 from 波之后才会出现；每波出现概率 = base + perWave × 距上次遇到商人的波数（保底，平均约 2.5 波一次）
+export const MERCHANT_EVENT = { from: 2, base: 0, perWave: 0.2, choices: 2 };
 
 // 结算星尘：按技术表现而不是存活时间
 export const SETTLEMENT = {
