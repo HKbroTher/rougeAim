@@ -255,7 +255,7 @@ export const SETTLEMENT = {
 // 5×5 共 25 张卡。星尘解锁卡牌；每张卡有心力消耗，装备的卡总消耗不能超过心力上限。
 // 21 张普通卡总消耗 52，心力最高只有 24：满级也只能装不到一半，构筑来自取舍。
 // 每张卡可以升 3 次（1–4 级），升级只加强效果、不增加消耗；第 4 级需要 1 个星核。
-// 觉醒卡消耗 0，不能手动装备：满足各自的条件后自动生效（有的看命盘的形状，有的在局内达成）。
+// 觉醒卡消耗 0，不能手动装备。两条路任选其一即觉醒：① 上下左右相邻的普通卡全部装备；② 各自的特殊条件（有的看命盘形状，有的在局内达成）。
 // 解锁卡牌本身（不需要装备）就会把对应的局内强化加入奖池（unlocks）。
 export const DECK_SIZE = 5;
 export const CARD_MAX_LV = 4;
@@ -284,7 +284,7 @@ export const CARDS = [
   { id: 'h_pierce', pos: [0, 1], cat: 'head', icon: '⇶', name: '穿颅', cost: 2, unlock: 120, unlocks: ['pierce'], vals: [50, 70, 90, 120], fmt: pct,
     desc: '三选一中爆头流强化的出现权重 +{v}。', unlockText: '解锁即让核心「穿颅弹」进入奖池' },
   { id: 'w_full', pos: [0, 2], cat: 'wake', icon: '◉', name: '满盘', cost: 0, unlock: 90, coresToUnlock: 1, wake: 'full', vals: [2, 4, 6, 8],
-    desc: '每波开始护盾补到 1 层，并回复 {v} 生命。', needText: '觉醒：装备的总消耗恰好等于心力上限（一点不剩）' },
+    desc: '每波开始护盾补到 1 层，并回复 {v} 生命。', needText: '装备的总消耗恰好等于心力上限（一点不剩）' },
   { id: 's_heat', pos: [0, 3], cat: 'spray', icon: '♨', name: '过热', cost: 2, unlock: 120, unlocks: ['overheat'], vals: [50, 70, 90, 120], fmt: pct,
     desc: '三选一中扫射流强化的出现权重 +{v}。', unlockText: '解锁即让核心「过热枪管」及其配套进入奖池' },
   { id: 's_mag', pos: [0, 4], cat: 'spray', icon: '▥', name: '扩容', cost: 1, unlock: 0, vals: [2, 3, 4, 5], desc: '弹匣 +{v}。' },
@@ -299,7 +299,7 @@ export const CARDS = [
     desc: '一枪击杀的目标，金币 +{v}。', unlockText: '解锁即让核心「甩枪大师」和「鹰眼弹」进入奖池' },
   { id: 'e_stake', pos: [2, 1], cat: 'econ', icon: '●', name: '随身盘缠', cost: 1, unlock: 60, vals: [25, 40, 55, 70], desc: '开局携带 {v} 金币。' },
   { id: 'w_few', pos: [2, 2], cat: 'wake', icon: '☍', name: '独行', cost: 0, unlock: 180, coresToUnlock: 1, wake: 'few', vals: [1, 2, 2, 3],
-    desc: '每打完一个区域（第 5、10、15 波），随机激活 {v} 张已解锁但没装备的卡，本局有效。', needText: '觉醒：装备的卡不超过 4 张' },
+    desc: '每打完一个区域（第 5、10、15 波），随机激活 {v} 张已解锁但没装备的卡，本局有效。', needText: '装备的卡不超过 4 张' },
   { id: 'e_fate', pos: [2, 3], cat: 'econ', icon: '🎲', name: '命运之手', cost: 2, unlock: 90, vals: [1, 2, 2, 3], desc: '开局多 {v} 个命运骰。' },
   { id: 's_suppress', pos: [2, 4], cat: 'spray', icon: '⊗', name: '压制', cost: 3, unlock: 150, unlocks: ['suppress'], vals: [12, 15, 18, 22], fmt: pct,
     desc: '换弹时间 −{v}。', unlockText: '解锁即让核心「压制火力」进入奖池' },
@@ -316,11 +316,11 @@ export const CARDS = [
   { id: 't_stasis', pos: [4, 1], cat: 'time', icon: '⏸', name: '时停', cost: 2, unlock: 120, unlocks: ['stasis'], vals: [50, 70, 90, 120], fmt: pct,
     desc: '三选一中子弹时间流强化的出现权重 +{v}。', unlockText: '解锁即让核心「时停」进入奖池' },
   { id: 'w_rank', pos: [4, 2], cat: 'wake', icon: '♛', name: '巅峰', cost: 0, unlock: 120, coresToUnlock: 1, wake: 'rank', vals: [10, 15, 20, 25], fmt: pct,
-    desc: '此后本局击杀金币 +{v}，评级掉到 A 以下时立刻回到 A。（每波一次）', needText: '觉醒：局内火力评级第一次达到 S' },
+    desc: '此后本局击杀金币 +{v}，评级掉到 A 以下时立刻回到 A。（每波一次）', needText: '局内火力评级第一次达到 S' },
   { id: 't_debt', pos: [4, 3], cat: 'time', icon: '⧖', name: '时间债', cost: 3, unlock: 150, unlocks: ['timedebt'], vals: [0.5, 0.6, 0.8, 1], fmt: (v) => `${v} 秒`,
     desc: '子弹时间 +{v}。', unlockText: '解锁即让核心「时间债」进入奖池' },
   { id: 'w_star', pos: [4, 4], cat: 'wake', icon: '✶', name: '群星', cost: 0, unlock: 150, coresToUnlock: 1, wake: 'all', vals: [10, 15, 20, 25], fmt: pct,
-    desc: '结算星尘 +{v}，开局多 1 个命运骰。', needText: '觉醒：装备的卡覆盖全部五类（宽容 / 爆头 / 扫射 / 子弹时间 / 经济）' },
+    desc: '结算星尘 +{v}，开局多 1 个命运骰。', needText: '装备的卡覆盖全部五类（宽容 / 爆头 / 扫射 / 子弹时间 / 经济）' },
 ];
 
 export const cardValue = (card, lv) => card.vals[Math.max(0, Math.min(card.vals.length, lv) - 1)];

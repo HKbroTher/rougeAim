@@ -1,7 +1,7 @@
 // 单局状态与规则（不依赖渲染，便于单测和平衡模拟）。
 import { PLAYER, WEAPON, RATING, FOCUS, SHOP, WAVES, KEEPSAKES, WELL, WELL_ITEMS, CARDS, cardValue } from './config.js';
 import { UPGRADES, BASE_MAX_LEVEL } from './upgrades.js';
-import { unlockedUpgrades, keepsakeLevel, activeCards, cardLevels } from './meta.js';
+import { unlockedUpgrades, keepsakeLevel, activeCards, cardLevels, wakeState } from './meta.js';
 
 export function createRun(save) {
   const cards = activeCards(save);
@@ -20,7 +20,7 @@ export function createRun(save) {
     rating: { tier: 0, points: 0, idle: 0, peak: 0 },
     ratingScore: 0,  // 每波结束时的评级累加（结算星尘）
     reviveUsed: false,
-    rankAwake: false,  // 巅峰：本局评级第一次到 S 后觉醒
+    rankAwake: wakeState(save, CARD_BY_ID.w_rank) === 'awake', // 巅峰：相邻卡全装则开局就觉醒，否则本局评级第一次到 S 后觉醒
     rankSaveUsed: false,
     unlockedCards: [...save.deck.unlocked],
     gifted: [],        // 独行：本局额外激活的卡

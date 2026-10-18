@@ -212,6 +212,30 @@ const results = await page.evaluate(async () => {
   run.waveIndex = 4;
   R.finishWave(run);
   check('独行：打完区域激活 1 张没带的卡', run.cards.size === had + 1 && run.lastGifted.length === 1 && !cfg.CARDS.find((c) => c.id === run.lastGifted[0]).opening, run.lastGifted);
+  // ---- 觉醒的第二条路：相邻卡全装 ----
+  check('相邻：满盘的邻居 = 穿颅、过热、护盾发生器', meta.cardNeighbors(meta.cardById('w_full')).map((c) => c.id).sort().join() === 'h_pierce,s_heat,v_shield');
+  check('相邻：独行在中心，四个邻居', meta.cardNeighbors(meta.cardById('w_few')).length === 4);
+  for (const id of ['t_stasis', 't_debt', 'e_star']) meta.unlockCard(g.save, id);
+  g.save.deck.capacityLv = 7; // 心力 24
+  g.save.deck.active = [];
+  ['e_star', 't_debt'].forEach((id) => meta.toggleCard(g.save, id));
+  let r2 = meta.wakeRoutes(g.save, meta.cardById('w_star'));
+  check('群星：相邻（星图、时间债）全装即觉醒，不用凑五类', r2.adjacent && !r2.special && meta.wakeState(g.save, meta.cardById('w_star')) === 'awake');
+  ['v_shield', 'e_supply', 'e_stake', 'e_fate', 'v_body'].forEach((id) => meta.toggleCard(g.save, id));
+  r2 = meta.wakeRoutes(g.save, meta.cardById('w_few'));
+  check('独行：装了 7 张（特殊条件不满足），四邻全装照样觉醒', r2.adjacent && !r2.special && meta.wakeState(g.save, meta.cardById('w_few')) === 'awake');
+  meta.toggleCard(g.save, 'e_fate');
+  check('独行：卸下一张邻卡、又超过 4 张 → 失效', meta.wakeState(g.save, meta.cardById('w_few')) === 'dormant');
+  check('巅峰：邻卡没全装时等局内觉醒', meta.wakeState(g.save, meta.cardById('w_rank')) === 'inrun' && !fresh({}).rankAwake);
+  meta.toggleCard(g.save, 't_stasis');
+  check('巅峰：邻卡（开局补给、时停、时间债）全装 → 开局就觉醒', meta.wakeState(g.save, meta.cardById('w_rank')) === 'awake' && fresh({}).rankAwake);
+  run = fresh({});
+  run.rating = { tier: 3, points: 0, idle: 0, peak: 3 };
+  check('巅峰（相邻觉醒）：第 1 波就有金币加成', R.killGold(run, 10) === Math.round(10 * 1.65 * 1.1));
+  // 两条路都满足也只算一张卡
+  ['h_pierce', 's_heat'].forEach((id) => { meta.unlockCard(g.save, id); meta.toggleCard(g.save, id); });
+  const act = [...meta.activeCards(g.save)];
+  check('觉醒卡不会重复计入', act.length === new Set(act).size);
   g.save.deck.unlocked.push('h_flick');
   check('解锁卡牌即把核心加入奖池', meta.unlockedUpgrades(g.save).includes('pierce') && meta.unlockedUpgrades(g.save).includes('flickmaster'));
   Object.assign(g.save, save0);

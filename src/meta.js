@@ -110,15 +110,30 @@ export function deckUsed(save) {
 export const cardLevel = (save, id) => (cardUnlocked(save, id) ? save.deck.levels[id] || 1 : 0);
 
 // 觉醒条件。'rank' 在局内达成，这里只要解锁就算「待觉醒」
+// 上下左右相邻的普通卡（觉醒卡不算）
+export function cardNeighbors(card) {
+  const [r, c] = card.pos;
+  return CARDS.filter((x) => x.cat !== 'wake' && Math.abs(x.pos[0] - r) + Math.abs(x.pos[1] - c) === 1);
+}
+
+// 觉醒有两条路，满足任意一条即可：
+//   ① 相邻：上下左右的普通卡全部装备
+//   ② 各自的特殊条件（'rank' 在局内达成）
+export function wakeRoutes(save, card) {
+  const eq = save.deck.active.map(cardById).filter(Boolean);
+  const adjacent = cardNeighbors(card).every((x) => cardEquipped(save, x.id));
+  let special = false;
+  if (card.wake === 'full') special = eq.length > 0 && deckUsed(save) === deckCapacity(save);
+  else if (card.wake === 'few') special = eq.length > 0 && eq.length <= 4;
+  else if (card.wake === 'all') special = Object.keys(CARD_CATS).filter((c) => c !== 'wake').every((c) => eq.some((x) => x.cat === c));
+  return { adjacent, special };
+}
+
 export function wakeState(save, card) {
   if (card.cat !== 'wake' || !cardUnlocked(save, card.id)) return 'locked';
-  const eq = save.deck.active.map(cardById).filter(Boolean);
-  let ok = false;
-  if (card.wake === 'full') ok = eq.length > 0 && deckUsed(save) === deckCapacity(save);
-  else if (card.wake === 'few') ok = eq.length > 0 && eq.length <= 4;
-  else if (card.wake === 'all') ok = Object.keys(CARD_CATS).filter((c) => c !== 'wake').every((c) => eq.some((x) => x.cat === c));
-  else if (card.wake === 'rank') return 'inrun';
-  return ok ? 'awake' : 'dormant';
+  const { adjacent, special } = wakeRoutes(save, card);
+  if (adjacent || special) return 'awake';
+  return card.wake === 'rank' ? 'inrun' : 'dormant';
 }
 
 export function cardAwake(save, card) {
