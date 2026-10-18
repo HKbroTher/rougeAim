@@ -321,3 +321,13 @@ input[type=checkbox] { pointer-events: auto; width: 18px; height: 18px; accent-c
 .wake-routes { text-align: left; line-height: 1.5; }
 .wake-routes b { display: inline-block; width: 1em; color: var(--dim); }
 .wake-routes b.ok { color: var(--good); text-shadow: 0 0 6px var(--good); }
+
+/* Boss 血条 */
+#boss-bar { position: absolute; top: 18px; left: 50%; transform: translateX(-50%); width: min(560px, 60vw); text-align: center; }
+.boss-row { display: flex; justify-content: space-between; font-size: 14px; color: var(--text); text-shadow: 0 0 6px rgba(0, 0, 0, 0.8); }
+#boss-name { font-weight: 700; letter-spacing: 1px; }
+#boss-status { color: var(--gold); font-weight: 700; }
+#boss-hp { position: relative; height: 12px; margin-top: 4px; background: rgba(0, 0, 0, 0.55); border: 1px solid #6a1f33; }
+#boss-fill { height: 100%; width: 100%; background: linear-gradient(90deg, #ff3b6b, #ff8fa3); box-shadow: 0 0 10px rgba(255, 59, 107, 0.6); transition: width 0.12s; }
+#boss-bar.vuln #boss-fill { background: linear-gradient(90deg, #ffc23d, #fff3b0); box-shadow: 0 0 14px var(--gold); }
+#boss-hint { margin-top: 4px; font-size: 12px; color: var(--dim); text-shadow: 0 0 4px #000; }

@@ -515,6 +515,15 @@ function rollSlot(run, exclude, { allowCore = true } = {}) {
 // 三选一。opts.school：只出某流派（遗物 3 级的开局三选一）
 export function rollRewardChoices(run, n = 3, opts = {}) {
   const out = [];
+  // Boss 战利品：只出核心强化（核心不够时用流派强化补齐）
+  if (opts.core) {
+    while (out.length < n) {
+      const id = rollKind(run, 'core', out) || rollKind(run, 'school', out) || rollKind(run, 'base', out);
+      if (!id) break;
+      out.push(id);
+    }
+    return out;
+  }
   if (opts.school) {
     while (out.length < n) {
       const id = rollKind(run, 'school', out, opts.school);

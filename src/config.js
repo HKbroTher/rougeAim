@@ -83,12 +83,12 @@ export const WAVE_CURVE = {
   // 目标：高手一般死在第 12 波左右，只有非常强的发挥才能通关（模拟测试见 docs/DESIGN.md §2.7）
   countBase: 9,         // 第 1 波敌人数
   countLinear: 1.0,      // 每波线性增加
-  countQuad: 0.02,       // 二次项，让后期密度加速上升
+  countQuad: 0.035,       // 二次项，让后期密度加速上升
   intervalBase: 1.1,     // 第 1 波平均出怪间隔（秒）
-  intervalDecay: 0.955,  // 每波乘以该系数
+  intervalDecay: 0.945,  // 每波乘以该系数
   intervalMin: 0.36,
-  speedPerWave: 0.016,   // 每波敌人速度 +1.6%
-  damagePerWave: 0.015,   // 每波碰撞伤害 +2%（第 12 波 1.22x），让后期每一次失误都更痛
+  speedPerWave: 0.03,   // 每波敌人速度 +1.6%
+  damagePerWave: 0.03,   // 每波碰撞伤害 +2%（第 12 波 1.22x），让后期每一次失误都更痛
   arcBase: 120,          // 第 1 波出怪扇区（度）
   arcPerWave: 40,        // 每波扩大，第 7 波起 360°
   chargerFrom: 2, chargerPerWave: 0.022, chargerMax: 0.3,
@@ -164,7 +164,43 @@ function makeWave(n) {
   };
 }
 
-export const WAVES = Array.from({ length: WAVE_COUNT }, (_, i) => makeWave(i + 1));
+// 每个区域的最后一波（第 5、10、15、20 波）是 Boss 战
+export const BOSS_WAVES = { 5: 'gate', 10: 'falcon', 15: 'hive', 20: 'final' };
+
+// ---------------- Boss 战 ----------------
+// Boss 不冲过来，只在远处发射小球。小球飞到你身上才扣血，打一下就碎（重弹要打好几下）。
+// 打 Boss 的弱点 = 爆头（爆头倍率和爆头流强化都生效），并触发这个 Boss 的专属效果；
+// 打身体只有 50% 伤害，持续开火 2 秒内逐渐升到 100%（打空也算持续开火）。
+export const BOSS = {
+  bodyMul: 0.5,          // 打 Boss 身体的伤害倍率（刚开火时）
+  armorRamp: 2,          // 持续开火这么多秒后，打身体的伤害升到 100%（扫射流打 Boss 的路线）
+  vulnMul: 1.5,          // 破绽期间受到的伤害倍率
+};
+
+export const BOSSES = {
+  gate: { name: '守门炮台', skill: '点射 · 打断', hp: 320, gold: 50, color: 0x8d99ae, weakText: '蓄力时打炮口 → 打断这一轮攻击并踉跄' },
+  falcon: { name: '游隼', skill: '甩枪 · 破绽', hp: 360, gold: 70, color: 0x48cae4, weakText: '发射后眼睛张开 1 秒，打中 → 破绽：停住 1.5 秒、受到伤害 +50%' },
+  hive: { name: '蜂巢', skill: '切换目标 · 拆除', hp: 480, gold: 90, color: 0xb5838d, weakText: '三个发射舱就是弱点，打爆一个，这种小球就不会再出现' },
+  final: { name: '终局', skill: '跟枪 · 清屏', hp: 700, gold: 120, color: 0xe63946, weakText: '绕着身体旋转的核心，打中 → 场上所有小球碎掉（4 秒冷却）' },
+};
+
+// 小球：radius 半径（米）、speed 飞行速度（米/秒）、hp、damage 撞到你的伤害
+export const ORBS = {
+  normal: { name: '普通弹', radius: 0.38, speed: 7, hp: 1, damage: 10, color: 0xff5470 },
+  fast: { name: '疾弹', radius: 0.24, speed: 10, hp: 1, damage: 6, color: 0xffe066 },
+  heavy: { name: '重弹', radius: 0.85, speed: 3.2, hp: 16, damage: 28, color: 0x9d4edd },
+  split: { name: '分裂弹', radius: 0.5, speed: 5.5, hp: 1, damage: 12, color: 0x06d6a0, core: 0.24 }, // 打中核心（中间 ~45%）直接消失，否则裂成 3 个碎片
+  shard: { name: '碎片', radius: 0.2, speed: 8, hp: 1, damage: 6, color: 0x80ffdb },
+  snake: { name: '蛇形弹', radius: 0.36, speed: 6, hp: 1, damage: 10, color: 0xff9e00, amp: 2.6, freq: 0.7 },
+  orbit: { name: '回旋弹', radius: 0.34, speed: 7, hp: 1, damage: 10, color: 0x4cc9f0, sweep: 2.6 }, // 先绕 sweep 弧度到你侧后方再冲进来
+};
+
+export const WAVES = Array.from({ length: WAVE_COUNT }, (_, i) => {
+  const w = makeWave(i + 1);
+  const boss = BOSS_WAVES[i + 1];
+  if (boss) Object.assign(w, { boss, name: `第 ${i + 1} 波 · Boss：${BOSSES[boss].name}`, count: {}, total: 1, mobility: null });
+  return w;
+});
 
 // 为本波的一个 bot 抽取机动方式
 export function rollMove(wave, type) {

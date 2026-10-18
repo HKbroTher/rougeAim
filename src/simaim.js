@@ -86,7 +86,9 @@ export class SimAimer {
       if (b.dead || !this.hist.has(b.id)) continue;
       const p = b.position;
       const ang = Math.abs(wrap(Math.atan2(-p.x, -p.z) - fwdYaw));
-      const score = b.distance + ang * 5; // 优先近的，其次是离准星近的
+      // 优先近的，其次是离准星近的。Boss 战：小球按「还有多久撞到我」排序（还在绕圈的回旋弹不急），Boss 最后打
+      const near = b.isOrb ? ((b.distance - 1.1) / b.speed + ((b.sweepLeft || 0) * Math.max(b.r, 4)) / b.speed) * 8 : b.distance;
+      const score = near + ang * 5 + (b.isBoss ? 15 : 0);
       if (score < bestScore) { bestScore = score; best = b; }
     }
     if (best !== this.target) {
@@ -101,7 +103,7 @@ export class SimAimer {
     const run = g.run;
     this.t += dt;
     this.record();
-    if (!this.target || this.target.dead) this.pickTarget();
+    if (!this.target || this.target.dead || this.target.isBoss) this.pickTarget();
     else if (Math.random() < dt * 2) this.pickTarget(); // 偶尔重新评估威胁
     const bot = this.target;
     g.firing = false;
@@ -127,12 +129,15 @@ export class SimAimer {
 
     // 觉得准星落在目标上才开枪
     const radius = this.aimHead ? bot.def.head : Math.min(bot.def.body[0], bot.def.body[1]) * 0.45;
-    const tol = (radius / Math.max(1, d.length())) * this.k.trigger * (this.hold && this.wasFiring ? 1.6 : 1);
+    // 扫射型对小球也会好好瞄（小球只有几十厘米，按住乱扫只会打空）
+    const loose = bot.isOrb ? Math.min(1, this.k.trigger) : this.k.trigger * (this.hold && this.wasFiring ? 1.6 : 1);
+    const tol = (radius / Math.max(1, d.length())) * loose;
     if (err < tol && this.acquire <= 0) g.firing = true;
     this.wasFiring = g.firing;
 
     // 战术换弹和子弹时间
-    const near = g.bots.filter((b) => !b.dead && b.distance < 10).length;
+    // 10 米内的敌人，或者空中任何一个小球（疾弹 1.5 秒就到，比换弹还快）都算威胁
+    const near = g.bots.filter((b) => !b.dead && (b.distance < 10 || b.isOrb)).length;
     if (run.ammo <= 3 && near === 0) g.tryReload(true);
     if (R.canActivateFocus(run) && near >= 3) g.tryFocus();
   }

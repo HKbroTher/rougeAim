@@ -1,6 +1,6 @@
 // DOM 界面：HUD 与各个全屏界面。按钮通过 data-action 统一派发给 game。
 import { UPGRADES, SCHOOLS, CAT_LABEL, BASE_MAX_LEVEL } from './upgrades.js';
-import { KEEPSAKES, BOTS, WAVES, FOCUS, SHOP, SETTLEMENT, WEAPON, WELL, WELL_ITEMS, RATING, CARDS, CARD_CATS, DECK_SIZE, DECK_CAPACITY, CARD_MAX_LV, cardValue } from './config.js';
+import { KEEPSAKES, BOTS, BOSSES, WAVES, FOCUS, SHOP, SETTLEMENT, WEAPON, WELL, WELL_ITEMS, RATING, CARDS, CARD_CATS, DECK_SIZE, DECK_CAPACITY, CARD_MAX_LV, cardValue } from './config.js';
 import { keepsakeLevel, shopStats, cardUnlocked, cardEquipped, wakeState, deckCapacity, deckUsed, nextCapacityCost, activeCards, cardLevel, nextCardUpgrade, cardNeighbors, wakeRoutes } from './meta.js';
 import * as R from './run.js';
 import { gameSens, cm360, equivalents, GAME_YAW, FOV_PRESETS } from './sens.js';
@@ -101,6 +101,8 @@ export class UI {
     }[tab]();
     const refund = save.refunded ? `<div class="ok-box">存档迁移：旧版工坊、遗物升级和已删除卡牌的花费已全部退还，共 <span class="stardust">✦ ${save.refunded}</span>。</div>` : '';
     save.refunded = 0;
+    const notice = this.notice ? `<div class="ok-box">${this.notice}</div>` : '';
+    this.notice = '';
     const same = this.lastTitleTab === tab && !this.screen.hidden && this.screen.querySelector('.title-card');
     this.lastTitleTab = tab;
     this.show(`
@@ -114,7 +116,7 @@ export class UI {
           <div class="big-num"><span class="stardust">✦ ${save.stardust}<small>星尘</small></span>　<span class="core-txt">◆ ${save.cores || 0}<small>星核</small></span></div>
         </div>
         <nav class="menu">${tabs.map(([id, n]) => `<button class="tab ${id === tab ? 'on' : ''}" data-action="tab" data-tab="${id}">${n}</button>`).join('')}</nav>
-        ${refund}
+        ${refund}${notice}
         <div class="screen-body">${body}</div>
       </div>`, { keep: !!same });
   }
@@ -531,7 +533,19 @@ export class UI {
     $('shield').innerHTML = '<span></span>'.repeat(run.shield);
     $('gold-val').textContent = run.gold;
     $('wave-label').textContent = waveLabel;
-    $('enemies-left').textContent = `剩余敌人 ${enemiesLeft}`;
+    // Boss 战：顶部血条 + 弱点提示；右上角显示场上小球数
+    const boss = extra.boss;
+    $('boss-bar').hidden = !boss;
+    if (boss) {
+      $('boss-name').textContent = `${boss.def.label}　${BOSSES[boss.bossId].skill}`;
+      $('boss-status').textContent = boss.dead ? '击破' : boss.status;
+      $('boss-fill').style.width = `${Math.max(0, boss.hp / boss.maxHp) * 100}%`;
+      $('boss-bar').classList.toggle('vuln', boss.vuln > 0);
+      $('boss-hint').textContent = `弱点：${BOSSES[boss.bossId].weakText}`;
+      $('enemies-left').textContent = `小球 ${Math.max(0, enemiesLeft - (boss.dead ? 0 : 1))}`;
+    } else {
+      $('enemies-left').textContent = `剩余敌人 ${enemiesLeft}`;
+    }
     // 火力评级：字母 + 进度条 + 金币倍率；升降级时闪一下
     const rt = run.rating;
     const t = TIER(rt.tier);
@@ -658,7 +672,7 @@ export class UI {
       if (d > range) { sx *= range / d; sy *= range / d; }
       c.fillStyle = `#${b.def.color.toString(16).padStart(6, '0')}`;
       c.beginPath();
-      c.arc(mid + sx * scale, mid - sy * scale, b.type === 'heavy' ? 5 : 3.5, 0, Math.PI * 2);
+      c.arc(mid + sx * scale, mid - sy * scale, b.isBoss ? 8 : b.isOrb ? 2.2 : b.type === 'heavy' ? 5 : 3.5, 0, Math.PI * 2);
       c.fill();
     }
     c.fillStyle = '#fff';

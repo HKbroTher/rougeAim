@@ -16,6 +16,7 @@ const results = await page.evaluate(async () => {
   const R = await import('./src/run.js');
   const { UPGRADES } = await import('./src/upgrades.js');
   const { Bot } = await import('./src/bots.js');
+  const THREE = await import('./vendor/three.module.min.js');
   const g = window.game;
 
   const fresh = (ups = {}, extra = {}) => {
@@ -353,6 +354,106 @@ const results = await page.evaluate(async () => {
   run.waveIndex = 4;
   R.finishWave(run);
   check('进入新区域 +1 命运骰', run.rerolls === startDice + 1, run.rerolls);
+
+  // ---- Boss 战 ----
+  {
+    const cfgB = await import('./src/config.js');
+    const { createBoss, Orb } = await import('./src/boss.js');
+    check('Boss 波：第 5/10/15/20 波', [5, 10, 15, 20].every((n) => cfgB.WAVES[n - 1].boss) && cfgB.WAVES.filter((w) => w.boss).length === 4);
+    const spawned = [];
+    const spawnFn = (kind, o) => spawned.push(kind);
+    const gate = createBoss('gate', g.world.scene, Math.PI, spawnFn);
+    const runB = fresh({});
+    runB.sprayTime = 0;
+    check('Boss：弱点 ×1、身体 ×0.5', gate.takeMul(true, runB) === 1 && gate.takeMul(false, runB) === 0.5);
+    runB.sprayTime = 1;
+    check('Boss：持续开火 1 秒，身体 ×0.75', near(gate.takeMul(false, runB), 0.75));
+    runB.sprayTime = 5;
+    check('Boss：持续开火 2 秒以上，身体 ×1', gate.takeMul(false, runB) === 1);
+    gate.charge = 0.5;
+    gate.visuals();
+    check('守门炮台：蓄力时炮口开放（按爆头算）', gate.muzzle.userData.part === 'head');
+    check('守门炮台：蓄力时打炮口 → 打断 + 踉跄', gate.onWeakHit(g, {}) === '打断！' && gate.charge === 0 && gate.stun > 0);
+    check('守门炮台：没在蓄力时打炮口没有效果', gate.onWeakHit(g, {}) === null);
+    gate.stun = 0; gate.charge = 0; gate.timer = 0.01;
+    for (let i = 0; i < 70; i++) gate.update(1 / 60, 1);
+    check('守门炮台：前摇结束发射小球', spawned.length >= 1, spawned);
+    gate.remove();
+    const falcon = createBoss('falcon', g.world.scene, Math.PI, spawnFn);
+    check('游隼：眼睛没张开时打中没效果', falcon.onWeakHit(g, {}) === null);
+    falcon.eyeOpen = 0.5;
+    check('游隼：眼睛张开时打中 → 破绽，伤害 ×1.5', falcon.onWeakHit(g, {}) === '破绽！' && falcon.takeMul(true, runB) === 1.5);
+    falcon.remove();
+    const hive = createBoss('hive', g.world.scene, Math.PI, spawnFn);
+    const pod = hive.pods[0];
+    hive.onWeakHit(g, { mesh: pod.mesh, dmg: 30 });
+    check('蜂巢：打发射舱扣舱的血', pod.alive && pod.hp === 15);
+    check('蜂巢：打爆发射舱 → 拆除', hive.onWeakHit(g, { mesh: pod.mesh, dmg: 30 }).startsWith('拆除') && !pod.alive && !hive.hitMeshes.includes(pod.mesh));
+    hive.pods.forEach((p2) => { p2.alive = false; });
+    hive.update(1 / 60, 1);
+    check('蜂巢：三个舱都拆掉 → 核心暴露', hive.phaseIdx === 1 && hive.eye.userData.part === 'head');
+    hive.remove();
+    run = fresh({});
+    run.unlocked = ['pierce', 'flickmaster', 'overheat', 'suppress', 'stasis', 'timedebt'];
+    const loot = R.rollRewardChoices(run, 3, { core: true });
+    check('Boss 战利品：三个都是核心强化', loot.length === 3 && loot.every((id) => UPGRADES[id].cat === 'core'), loot);
+
+    // 场景：小球、分裂弹、终局清屏
+    run = fresh({});
+    g.clearBots(); g.spawnQueue = []; g.waveDef = { name: 't', speedMul: 1 }; g.state = 'combat';
+    g.yaw = 0; g.pitch = 0;
+    const aimAt = (pos) => { const d = pos.clone().sub(g.camera.position); g.yaw = Math.atan2(-d.x, -d.z); g.pitch = Math.atan2(d.y, Math.hypot(d.x, d.z)); g.camera.rotation.set(g.pitch, g.yaw, 0); g.camera.updateMatrixWorld(); };
+    const orb = new Orb('normal', g.world.scene, { r: 8, theta: Math.PI, y: 1.6 });
+    g.bots.push(orb);
+    aimAt(orb.position);
+    g.nextShotT = 0;
+    g.fireAt(g.time, g.yaw, g.pitch);
+    check('小球：一枪打碎，不掉金币', orb.dead && run.gold === 0 && run.stats.orbs === 1);
+    const sp = new Orb('split', g.world.scene, { r: 8, theta: Math.PI, y: 1.6 });
+    g.bots = [sp];
+    aimAt(sp.position.clone().add(new THREE.Vector3(0.4, 0, 0)));
+    g.nextShotT = 0;
+    g.fireAt(g.time, g.yaw, g.pitch);
+    check('分裂弹：打外壳 → 裂成 3 个碎片', sp.dead && g.bots.filter((b) => b.kind === 'shard').length === 3);
+    const sp2 = new Orb('split', g.world.scene, { r: 8, theta: Math.PI, y: 1.6 });
+    g.clearBots(); g.bots = [sp2];
+    aimAt(sp2.position);
+    g.nextShotT = 0;
+    g.fireAt(g.time, g.yaw, g.pitch);
+    check('分裂弹：打核心 → 直接消失', sp2.dead && g.bots.filter((b) => !b.dead && b.isOrb).length === 0);
+    g.clearBots();
+    for (let i = 0; i < 4; i++) g.bots.push(new Orb('normal', g.world.scene, { r: 10 + i, theta: Math.PI + i * 0.3, y: 2 }));
+    const fin = createBoss('final', g.world.scene, Math.PI, () => {});
+    check('终局：打核心 → 场上小球全碎（4 秒冷却）', fin.onWeakHit(g) === '清屏 ×4' && fin.onWeakHit(g) === null);
+    fin.remove();
+    g.clearBots();
+
+    // ---- sub-tick ----
+    run = fresh({});
+    run.ammo = 99;
+    g.clearBots(); g.spawnQueue = []; g.state = 'combat'; g.waveDef = { name: 't', speedMul: 1 };
+    g.bots = [new Bot('normal', g.world.scene, 0, 200, 0)]; // 远处不动的敌人，防止这一波直接结束
+    g.nextShotT = 0;
+    g.firing = true;
+    for (let i = 0; i < 20; i++) g.update(0.05); // 20fps 跑 1 秒
+    g.firing = false;
+    check('sub-tick：20fps 下 1 秒按住连发打出 8 发（0.14 秒间隔不被凑整到帧）', run.stats.shots === 8, run.stats.shots);
+    run.stats.shots = 0;
+    g.nextShotT = 0;
+    check('sub-tick：点击时立刻开枪，不等下一帧', g.fireAt(g.time + 0.01, g.yaw, g.pitch) && run.stats.shots === 1);
+    check('sub-tick：射击间隔内再点不会多打', !g.fireAt(g.time + 0.05, g.yaw, g.pitch) && run.stats.shots === 1);
+    g.clearBots();
+    g.state = 'title';
+  }
+
+  // ---- 开发者作弊码 ----
+  {
+    const sd = g.save.stardust;
+    const cs = g.save.cores || 0;
+    g.cheat();
+    check('作弊码：+99999 星尘、+99999 星核', g.save.stardust === sd + 99999 && g.save.cores === cs + 99999);
+    g.save.stardust = sd; g.save.cores = cs;
+  }
 
   // ---- 场景：穿颅弹 ----
   run = fresh({ pierce: 1, guillotine: 1 });

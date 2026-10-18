@@ -3,11 +3,12 @@ import * as THREE from '../vendor/three.module.min.js';
 import { PLAYER, WEAPON, WAVES, ARENA, SETTLEMENT, FOCUS, THREAT, MOVEMENT, rollMove } from './config.js';
 import { SCHOOLS } from './upgrades.js';
 import { Bot } from './bots.js';
+import { createBoss, Orb } from './boss.js';
 import { UI } from './ui.js';
 import { createWorld } from './world.js';
 import { initAudio, setVolume, sfx } from './audio.js';
 import { loadSave, persist, resetSave, buyKeepsake, selectKeepsake, recordRun, unlockCard, toggleCard, buyCapacity, upgradeCard } from './meta.js';
-import { CARDS } from './config.js';
+import { CARDS, BOSSES } from './config.js';
 import * as R from './run.js';
 import { SimAimer, SKILLS, STYLES } from './simaim.js';
 import { gameSens, radPerCount, sensInSource } from './sens.js';
@@ -28,7 +29,8 @@ export class Game {
     this.bots = [];
     this.run = null;
     this.firing = false;
-    this.cooldown = 0;
+    this.nextShotT = 0;   // 下一发子弹最早可以在什么时刻打出（游戏时间，秒）
+    this.boss = null;
     this.time = 0;
     this.raycaster = new THREE.Raycaster();
     this.raycaster.far = WEAPON.range;
@@ -65,13 +67,24 @@ export class Game {
     });
     document.addEventListener('mousedown', (e) => {
       if (this.state !== 'combat') return;
-      if (e.button === 0) this.firing = true;
+      if (e.button === 0) {
+        this.firing = true;
+        // sub-tick：第一发在点击的那一刻、用那一刻的准星判定，不等下一帧
+        this.fireAt(this.eventTime(e), this.yaw, this.pitch);
+      }
       if (e.button === 2) this.tryFocus();
     });
     document.addEventListener('mouseup', (e) => {
       if (e.button === 0) this.firing = false;
     });
     document.addEventListener('contextmenu', (e) => e.preventDefault());
+    // 开发者作弊码：在标题界面（不在输入框里时）直接键入 motherlode
+    this.cheatBuf = '';
+    document.addEventListener('keydown', (e) => {
+      if (this.state !== 'title' || e.target.tagName === 'INPUT' || e.key.length !== 1) return;
+      this.cheatBuf = (this.cheatBuf + e.key.toLowerCase()).slice(-20);
+      if (this.cheatBuf.endsWith('motherlode')) { this.cheatBuf = ''; this.cheat(); }
+    });
     document.addEventListener('keydown', (e) => {
       if (this.state !== 'combat') return;
       if (e.code === 'KeyE' || e.code === 'Space') {
@@ -128,6 +141,46 @@ export class Game {
 
   unlock() {
     if (document.pointerLockElement) document.exitPointerLock();
+  }
+
+  // 开发者作弊码：+99999 星尘、+99999 星核，用来测试命盘卡牌强度
+  cheat() {
+    this.save.stardust += 99999;
+    this.save.cores = (this.save.cores || 0) + 99999;
+    persist(this.save);
+    sfx.buy();
+    this.ui.notice = '开发者作弊码：+99999 星尘、+99999 星核';
+    this.ui.title(this.save, this.titleTab, this.rawStatus);
+  }
+
+  // ---------------- sub-tick 开枪 ----------------
+  // 渲染按帧走，但开枪不按帧：
+  // - 点击发生在两帧之间时，立刻在点击那一刻、用那一刻的准星判定命中，不等下一帧；
+  // - 按住连发时，每一发都按准确的射击间隔排在时间轴上（一帧里可以打出多发），
+  //   低帧率下射速不会被「凑整到帧」拖慢。连发用当前准星，和敌人当前位置保持一致。
+
+  // 浏览器事件时间 → 游戏时间
+  eventTime(e) {
+    const ms = e && e.timeStamp ? e.timeStamp : performance.now();
+    return this.time + Math.max(0, (ms - this.last) / 1000) * this.timeScale;
+  }
+
+  canShoot() {
+    const run = this.run;
+    return this.state === 'combat' && run && !R.reloading(run) && run.ammo > 0;
+  }
+
+  // 在 t 时刻、用给定视角开一枪（如果射击间隔已经到了）
+  fireAt(t, yaw, pitch) {
+    if (!this.canShoot() || t < this.nextShotT) return false;
+    this.camera.rotation.set(pitch, yaw, 0);
+    this.camera.updateMatrixWorld();
+    this.shoot();
+    this.camera.rotation.set(this.pitch, this.yaw, 0);
+    this.camera.updateMatrixWorld();
+    this.nextShotT = t + R.fireInterval(this.run, WEAPON.fireInterval);
+    if (this.run.ammo <= 0) this.tryReload(false);
+    return true;
   }
 
   // ---------------- 界面动作 ----------------
@@ -323,6 +376,20 @@ export class Game {
     this.waveDef = def;
     this.state = 'combat';
     this.firing = false;
+    this.nextShotT = 0;
+    this.boss = null;
+    if (def.boss) {
+      // Boss 战：Boss 出现在你正前方远处，只发射小球
+      const spawn = (kind, opts) => {
+        const orb = new Orb(kind, this.world.scene, opts);
+        orb.spawnedAt = this.time;
+        this.bots.push(orb);
+        return orb;
+      };
+      this.boss = createBoss(def.boss, this.world.scene, center + Math.PI, spawn);
+      this.boss.spawnedAt = this.time;
+      this.bots.push(this.boss);
+    }
     this.worldScale = 1;
     this.yawHist = [];
     this.ui.hideScreen();
@@ -345,10 +412,12 @@ export class Game {
     this.unlock();
     this.rewardContext = 'wave';
     this.state = 'reward';
-    const choices = R.rollRewardChoices(run);
+    const bossDef = this.waveDef.boss ? BOSSES[this.waveDef.boss] : null;
+    const choices = bossDef ? R.rollRewardChoices(run, 3, { core: true }) : R.rollRewardChoices(run);
     if (!choices.length) { this.afterReward(); return; }
     const gifted = (run.lastGifted || []).map((id) => CARDS.find((c) => c.id === id).name);
-    this.rewardInfo = { title: `${WAVES[run.waveIndex - 1].name} 清除 · 选择一个强化${gifted.length ? `　//　独行激活：${gifted.join('、')}` : ''}`, opts: {} };
+    const head = bossDef ? `击破 ${bossDef.name} · 战利品：核心强化三选一` : `${WAVES[run.waveIndex - 1].name} 清除 · 选择一个强化`;
+    this.rewardInfo = { title: `${head}${gifted.length ? `　//　独行激活：${gifted.join('、')}` : ''}`, opts: bossDef ? { core: true } : {} };
     this.showReward(choices, this.rewardInfo.title);
   }
 
@@ -431,6 +500,7 @@ export class Game {
   clearBots() {
     for (const b of this.bots) b.remove();
     this.bots = [];
+    this.boss = null;
     this.world.fx.clear();
   }
 
@@ -453,8 +523,11 @@ export class Game {
   frame(now) {
     const dt = Math.min(0.05, (now - this.last) / 1000) * this.timeScale;
     this.last = now;
-    if (this.state === 'combat') this.update(dt);
-    else this.worldScale = 1;
+    if (this.state === 'combat') {
+      // 大帧拆成不超过 1/60 秒的小步：低帧率或调试加速时，敌人每步移动得少，瞄准和命中更准确
+      const steps = Math.min(16, Math.ceil(dt / (1 / 60)));
+      for (let i = 0; i < steps && this.state === 'combat'; i++) this.update(dt / steps);
+    } else this.worldScale = 1;
     this.camera.rotation.set(this.pitch, this.yaw, 0);
     this.world.fx.update(dt * this.worldScale);
     if (!NORENDER) this.world.renderer.render(this.world.scene, this.camera);
@@ -529,12 +602,14 @@ export class Game {
 
     // 换弹与射击（真实时间）
     if (R.tickReload(run, dt)) sfx.reloadDone();
-    this.cooldown -= dt;
     const canFire = this.firing && !R.reloading(run) && run.ammo > 0;
-    if (canFire && this.cooldown <= 0) {
-      this.shoot();
-      this.cooldown = R.fireInterval(run, WEAPON.fireInterval);
-      if (run.ammo <= 0) this.tryReload(false);
+    if (canFire) {
+      // 刚按下（或模拟瞄准刚开火）时不补发积压的子弹
+      if (this.nextShotT < this.time - dt) this.nextShotT = this.time - dt;
+      // 这一帧时间段内到点的每一发，都在它准确的时刻、用那一刻的视角打出去
+      for (let n = 0; n < 8 && this.firing && this.nextShotT <= this.time; n++) {
+        if (!this.fireAt(this.nextShotT, this.yaw, this.pitch)) break;
+      }
     }
     R.tickFire(run, dt, canFire);
     // 跟枪护盾：本波持续开火累计 4 秒
@@ -547,7 +622,9 @@ export class Game {
     }
 
     if (this.state !== 'combat') return;
-    this.ui.updateHud(run, `${this.waveDef.name} / ${WAVES.length}`, this.bots.length + this.spawnQueue.length, { flick: this.flickReady });
+    const boss = this.boss && !this.boss.dead ? this.boss : null;
+    if (boss && boss.phaseChanged) { boss.phaseChanged = false; sfx.focus(); this.ui.banner(boss.bossId === 'hive' ? '核心暴露' : `第 ${boss.phaseIdx + 1} 阶段`); }
+    this.ui.updateHud(run, `${this.waveDef.name} / ${WAVES.length}`, this.bots.length + this.spawnQueue.length, { flick: this.flickReady, boss: this.boss });
     this.ui.drawRadar(this.bots, this.yaw);
     this.ui.drawThreats(this.offscreenThreats(), this.time);
 
@@ -573,7 +650,8 @@ export class Game {
       return;
     }
     const { bot, part } = hit.object.userData;
-    const head = part === 'head';
+    // 分裂弹：命中点离球心足够近 = 打中核心（按爆头算，不会分裂）
+    const head = part === 'head' || (bot.isOrb && bot.def.core && this.raycaster.ray.distanceSqToPoint(bot.position) < bot.def.core ** 2 * 1.4);
     this.world.fx.tracer(muzzle, hit.point, head ? 0xff9e00 : 0xffffff);
     if (bot.firstHitAt == null) {
       bot.firstHitAt = this.time;
@@ -608,6 +686,11 @@ export class Game {
     if (fullHeat) bot.burn = { left: 2, acc: 0 };
 
     this.hurtBot(bot, dmg, { head, onetap: wasFull, fullHeat, bonusRating: flick ? 6 : 0 });
+    // Boss 弱点的专属效果（打断 / 破绽 / 拆除 / 清屏）
+    if (bot.isBoss && head && !bot.dead) {
+      const msg = bot.onWeakHit(this, { mesh: hit.object, dmg });
+      if (msg) { sfx.focus(); this.floatCenter(msg, 'head'); run.stats.weakEffects = (run.stats.weakEffects || 0) + 1; }
+    }
     if (head && R.has(run, 'headblast')) this.headBlast(bot.position.clone(), bot);
     if (head && R.has(run, 'pierce')) this.pierce(hit.point, this.raycaster.ray.direction.clone(), bot, dmg);
   }
@@ -617,6 +700,7 @@ export class Game {
     if (bot.dead || dmg <= 0) return false;
     const run = this.run;
     if (ctx.indirect && R.has(run, 'aftershock')) dmg *= 1.5;
+    if (bot.takeMul) dmg *= bot.takeMul(!!ctx.head, run); // Boss：身体 ×0.5（持续开火升到 ×1）、破绽 ×1.5
     const applied = Math.min(dmg, bot.hp);
     const killed = bot.damage(dmg);
     R.onDamage(run, applied, killed, ctx.bonusRating || 0);
@@ -690,6 +774,8 @@ export class Game {
   killBot(bot, ctx = {}) {
     if (bot.dead) return;
     const run = this.run;
+    if (bot.isOrb) { this.popOrb(bot, ctx); return; }
+    if (bot.isBoss) { this.killBoss(bot); return; }
     let base = bot.def.gold;
     if (R.has(run, 'bounty')) base += (ctx.head && !ctx.indirect ? 1 : 0) + (ctx.onetap ? 2 : 0);
     if (ctx.onetap) base *= 1 + R.cv(run, 'h_flick') / 100;
@@ -711,6 +797,49 @@ export class Game {
       }
       if (near) { near.b.burn = { left: 2, acc: 0 }; this.world.fx.shockwave(bot.position, 4, 0xff6b35); }
     }
+  }
+
+  // 打碎小球：不掉金币；分裂弹没打中核心会裂成 3 个碎片
+  popOrb(orb, ctx) {
+    const run = this.run;
+    run.stats.orbs = (run.stats.orbs || 0) + 1;
+    R.onKillInBulletTime(run);
+    if (ctx.head && !ctx.indirect && R.has(run, 'onetap')) R.refundAmmo(run, 1);
+    this.world.fx.burst(orb.position, orb.def.color, orb.kind === 'heavy' ? 18 : 8, 4);
+    sfx.kill();
+    orb.remove();
+    if (orb.kind === 'split' && !ctx.head) {
+      for (const d of [-0.06, 0, 0.06]) {
+        const sh = new Orb('shard', this.world.scene, { r: orb.r, theta: orb.theta + d, y: orb.y + (Math.random() - 0.5) });
+        sh.spawnedAt = this.time;
+        this.bots.push(sh);
+      }
+    }
+  }
+
+  // 场上所有小球碎掉（终局的清屏、击破 Boss），返回打碎的数量
+  shatterOrbs() {
+    let n = 0;
+    for (const b of this.bots) {
+      if (!b.isOrb || b.dead) continue;
+      this.world.fx.burst(b.position, b.def.color, 6, 3);
+      b.remove();
+      n++;
+    }
+    return n;
+  }
+
+  killBoss(boss) {
+    const run = this.run;
+    const gold = R.killGold(run, boss.def.gold);
+    run.stats.bossKills = (run.stats.bossKills || 0) + 1;
+    this.shatterOrbs();
+    this.world.fx.burst(boss.headWorld, boss.def.color, 60, 10);
+    this.world.fx.shockwave(boss.position, 8, boss.def.color);
+    this.floatCenter(`击破 ${boss.def.label}　+${gold}`, 'gold big');
+    this.ui.banner(`击破 ${boss.def.label}`);
+    sfx.kill();
+    boss.remove();
   }
 
   onBulletTimeEnd() {
@@ -746,7 +875,7 @@ export class Game {
     bot.remove();
     const res = R.takeDamage(run, Math.round(bot.def.damage * (this.waveDef.damageMul || 1)));
     // 平衡分析用：记录被哪种 bot / 机动碰到
-    const key = `${bot.type}:${bot.move.mode}`;
+    const key = bot.isOrb ? `orb:${bot.kind}` : `${bot.type}:${bot.move.mode}`;
     (run.stats.hurtBy ||= {})[key] = (run.stats.hurtBy[key] || 0) + 1;
     if (res.absorbed) { sfx.shield(); this.floatCenter('护盾抵挡', 'info'); }
     else { sfx.hurt(); this.ui.hurt(rel); }
