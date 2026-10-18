@@ -4,6 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>RogueAim 原型</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <!-- 像素字体只是锦上添花：异步加载，离线或被墙时自动退回系统等宽字体，不会阻塞游戏 -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=VT323&display=swap" media="print" onload="this.media='all'" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -43,9 +46,9 @@
     </div>
 
     <div id="hud-bottom">
-      <div id="combo-box">
-        <div id="mult">1.0x</div>
-        <div id="combo">连杀 0</div>
+      <div id="rating-box">
+        <div class="rating-row"><span class="rating-label">火力评级</span><span id="rating">D</span><span id="rating-gold">金币 ×1</span></div>
+        <div id="rating-bar"><div id="rating-fill"></div></div>
       </div>
       <div id="focus-wrap">
         <div id="focus-bar"><div id="focus-fill"></div></div>
@@ -59,6 +62,7 @@
   </div>
 
   <div id="screen" class="overlay"></div>
+  <div id="crt-fx" aria-hidden="true"></div>
 
   <script type="module" src="src/main.js"></script>
 </body>

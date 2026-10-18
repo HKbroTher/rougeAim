@@ -1,15 +1,19 @@
-// 局外存档：星尘、工坊等级、设置、枪法档案与商店决策日志（用于调价）。
-import { META_UPGRADES, KEEPSAKES } from './config.js';
+// 局外存档：星尘、命盘、遗物、设置、枪法档案与商店决策日志（用于调价）。
+import { CARDS, DECK_CAPACITY, KEEPSAKES, LEGACY_REFUND } from './config.js';
 import { migrateSettings } from './sens.js';
 
 const KEY = 'rougeaim.save.v1';
 const MAX_RUNS = 50;
 
+const STARTER_CARDS = CARDS.filter((c) => c.unlock === 0).map((c) => c.id);
+
 function defaults() {
   return {
+    version: 2,
     stardust: 0,
-    upgrades: {},            // id -> level
-    keepsakes: { hunter: 1, drum: 1, watch: 1 }, // 遗物 id -> 等级（三个流派遗物 1 级默认拥有）
+    // 命盘：unlocked 已解锁的卡，active 已装备的卡，capacityLv 心力上限升级次数
+    deck: { unlocked: [...STARTER_CARDS], active: [], capacityLv: 0 },
+    keepsakes: { hunter: 1, drum: 1, watch: 1 }, // 拥有的遗物（三个流派遗物默认拥有）
     keepsake: null,          // 本局携带的遗物
     // 灵敏度：sensSource（cs2 / valorant / cm360）+ sensInput（该来源下的数值）；fov 为垂直视野（度）
     settings: migrateSettings({ volume: 0.5 }),
@@ -18,11 +22,38 @@ function defaults() {
   };
 }
 
+// v1 → v2：旧星尘工坊被命盘取代，工坊花费和流派遗物的 2、3 级花费全部退还成星尘
+function migrate(save) {
+  if (save.version >= 2) return save;
+  let refund = 0;
+  for (const [id, lv] of Object.entries(save.upgrades || {})) {
+    const costs = LEGACY_REFUND.upgrades[id] || [];
+    for (let k = 0; k < Math.min(lv, costs.length); k++) refund += costs[k];
+  }
+  const ks = {};
+  for (const [id, lv] of Object.entries(save.keepsakes || {})) {
+    if (!(lv > 0)) continue;
+    ks[id] = 1;
+    const costs = LEGACY_REFUND.keepsakes[id];
+    if (costs && costs.length > 1) for (let k = 1; k < Math.min(lv, costs.length); k++) refund += costs[k];
+  }
+  save.keepsakes = { hunter: 1, drum: 1, watch: 1, ...ks };
+  delete save.upgrades;
+  save.stardust = (save.stardust || 0) + refund;
+  save.refunded = refund;    // 标题界面提示一次
+  save.version = 2;
+  return save;
+}
+
 export function loadSave() {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return defaults();
-    const save = { ...defaults(), ...JSON.parse(raw) };
+    const parsed = JSON.parse(raw);
+    const save = { ...defaults(), ...parsed };
+    if (!parsed.version) save.version = 1;
+    migrate(save);
+    save.deck = { ...defaults().deck, ...save.deck };
     migrateSettings(save.settings); // 旧版本的灵敏度倍率换算成 CS2 单位，手感不变
     return save;
   } catch {
@@ -43,44 +74,83 @@ export function resetSave() {
   return defaults();
 }
 
-export function upgradeLevel(save, id) {
-  return save.upgrades[id] || 0;
+// ---------------- 命盘 ----------------
+
+export const cardById = (id) => CARDS.find((c) => c.id === id);
+export const cardUnlocked = (save, id) => save.deck.unlocked.includes(id);
+export const cardEquipped = (save, id) => save.deck.active.includes(id);
+
+export function deckCapacity(save) {
+  return DECK_CAPACITY.base + DECK_CAPACITY.step * save.deck.capacityLv;
 }
 
-export function nextUpgradeCost(save, up) {
-  const lv = upgradeLevel(save, up.id);
-  return lv < up.costs.length ? up.costs[lv] : null;
+export function nextCapacityCost(save) {
+  const lv = save.deck.capacityLv;
+  return lv < DECK_CAPACITY.costs.length ? DECK_CAPACITY.costs[lv] : null;
 }
 
-export function buyUpgrade(save, id) {
-  const up = META_UPGRADES.find((u) => u.id === id);
-  const cost = up && nextUpgradeCost(save, up);
-  if (cost == null || save.stardust < cost) return false;
-  save.stardust -= cost;
-  save.upgrades[id] = upgradeLevel(save, id) + 1;
+export function deckUsed(save) {
+  return save.deck.active.reduce((a, id) => a + (cardById(id)?.cost || 0), 0);
+}
+
+// 觉醒卡：已解锁 + 条件里的卡全部装备
+export function cardAwake(save, card) {
+  return card.cat === 'wake' && cardUnlocked(save, card.id) && card.need.every((id) => cardEquipped(save, id));
+}
+
+// 本局生效的卡（装备的 + 觉醒的）
+export function activeCards(save) {
+  const out = new Set(save.deck.active.filter((id) => cardUnlocked(save, id)));
+  for (const c of CARDS) if (cardAwake(save, c)) out.add(c.id);
+  return out;
+}
+
+export function unlockCard(save, id) {
+  const c = cardById(id);
+  if (!c || cardUnlocked(save, id) || save.stardust < c.unlock) return false;
+  save.stardust -= c.unlock;
+  save.deck.unlocked.push(id);
   persist(save);
   return true;
 }
 
-export function unlockedUpgrades(save) {
-  return META_UPGRADES.filter((u) => u.unlocks && upgradeLevel(save, u.id) > 0).map((u) => u.unlocks);
+// 装备 / 卸下（觉醒卡不能手动装备）
+export function toggleCard(save, id) {
+  const c = cardById(id);
+  if (!c || c.cat === 'wake' || !cardUnlocked(save, id)) return false;
+  const d = save.deck;
+  if (d.active.includes(id)) d.active = d.active.filter((x) => x !== id);
+  else if (deckUsed(save) + c.cost <= deckCapacity(save)) d.active.push(id);
+  else return false;
+  persist(save);
+  return true;
 }
+
+export function buyCapacity(save) {
+  const cost = nextCapacityCost(save);
+  if (cost == null || save.stardust < cost) return false;
+  save.stardust -= cost;
+  save.deck.capacityLv++;
+  persist(save);
+  return true;
+}
+
+// 解锁卡牌即把对应的局内强化加入奖池（不需要装备）
+export function unlockedUpgrades(save) {
+  return CARDS.filter((c) => c.unlocks && cardUnlocked(save, c.id)).flatMap((c) => c.unlocks);
+}
+
+// ---------------- 遗物 ----------------
 
 export function keepsakeLevel(save, id) {
-  return (save.keepsakes && save.keepsakes[id]) || 0;
-}
-
-export function nextKeepsakeCost(save, k) {
-  const lv = keepsakeLevel(save, k.id);
-  return lv < k.costs.length ? k.costs[lv] : null;
+  return (save.keepsakes && save.keepsakes[id]) ? 1 : 0;
 }
 
 export function buyKeepsake(save, id) {
   const k = KEEPSAKES.find((x) => x.id === id);
-  const cost = k && nextKeepsakeCost(save, k);
-  if (cost == null || save.stardust < cost) return false;
-  save.stardust -= cost;
-  save.keepsakes = { ...save.keepsakes, [id]: keepsakeLevel(save, id) + 1 };
+  if (!k || keepsakeLevel(save, id) || save.stardust < k.cost) return false;
+  save.stardust -= k.cost;
+  save.keepsakes = { ...save.keepsakes, [id]: 1 };
   persist(save);
   return true;
 }

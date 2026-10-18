@@ -1,12 +1,15 @@
 // 平衡测试：用「模拟真人瞄准」跑若干局，统计能打到第几波、每波掉多少血、命中率。
 // 用法：python3 -m http.server 8000 &
-//       node tools/balance.mjs [技能=average] [局数=6] [并行=3] [url=http://localhost:8000/] [流派]
+//       node tools/balance.mjs [技能=average] [局数=6] [并行=3] [url=http://localhost:8000/] [流派] [打法]
 // 技能：novice / average / expert（见 src/simaim.js）
-// 流派：head / spray / time / random。给出流派时会解锁全部内容，携带该流派遗物 3 级，
+// 流派：head / spray / time / random。给出流派时会解锁命盘全部卡牌（不装备）、携带该流派遗物，
 //       三选一和商店优先拿该流派（random = 全部解锁、随机拿，用来做全强化的冒烟测试）。
+// 打法：default / precision（点射，几乎只瞄头）/ spray（扫射，瞄身体按住不放）。
+//       不填时：爆头流用 precision，扫射流用 spray，其余用 default。
 import { chromium } from 'playwright';
 
-const [skill = 'average', runsArg = '6', parArg = '3', base = 'http://localhost:8000/', school = ''] = process.argv.slice(2);
+const [skill = 'average', runsArg = '6', parArg = '3', base = 'http://localhost:8000/', school = '', styleArg = ''] = process.argv.slice(2);
+const style = styleArg || { head: 'precision', spray: 'spray' }[school] || 'default';
 const RUNS = Number(runsArg);
 const PAR = Number(parArg);
 const url = `${base}?debug&norender`;
@@ -20,19 +23,18 @@ async function playOne(i) {
   page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(url);
   await page.waitForFunction(() => window.game);
-  await page.evaluate(({ sk, school }) => {
+  await page.evaluate(({ sk, school, style }) => {
     game.timeScale = 4;
     if (school) {
-      // 解锁全部内容，携带对应流派遗物 3 级
-      for (const u of META_UPGRADES) game.save.upgrades[u.id] = u.costs.length;
+      // 解锁命盘全部卡牌（不装备），携带对应流派遗物
+      game.save.deck.unlocked = CARDS.map((c) => c.id);
       const ks = { head: 'hunter', spray: 'drum', time: 'watch' }[school];
-      game.save.keepsakes = { ...game.save.keepsakes, ...(ks ? { [ks]: 3 } : {}) };
       game.save.keepsake = ks || null;
     }
     window.__school = school;
     game.startRun();
-    game.sim = new SimAimer(game, SKILLS[sk]);
-  }, { sk: skill, school });
+    game.sim = new SimAimer(game, SKILLS[sk], style);
+  }, { sk: skill, school, style });
   for (let guard = 0; guard < 20000; guard++) {
     const state = await page.evaluate(() => game.state);
     if (state === 'results') break;
@@ -81,7 +83,7 @@ async function playOne(i) {
     const s = game.lastSummary;
     return {
       waves: s.waves, victory: s.victory, acc: s.accuracy, hs: s.hsRate, moverAcc: s.moverAcc,
-      maxCombo: s.maxCombo, stardust: s.stardust, reloads: r.stats.reloads,
+      peakTier: s.peakTier, avgTier: s.avgTier, dmg: r.stats.damage, stardust: s.stardust, reloads: r.stats.reloads,
       hurtBy: r.stats.hurtBy || {},
       ups: Object.entries(r.ups).map(([id, l]) => (l > 1 ? `${id}${l}` : id)).join(' '),
       log: r.waveLog.map((w) => ({
@@ -112,11 +114,12 @@ await browser.close();
 const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN);
 const pct = (v) => (Number.isFinite(v) ? `${(v * 100).toFixed(0)}%` : '—');
 const waves = results.map((r) => r.victory ? 21 : r.waves + 1); // 死在第几波（通关记 21）
-console.log(`\n技能 ${skill}${school ? `，流派 ${school}` : ''}，${RUNS} 局`);
+console.log(`\n技能 ${skill}${school ? `，流派 ${school}` : ''}，打法 ${style}，${RUNS} 局`);
 for (const r of results) console.log(`  强化：${r.ups}`);
 console.log(`死亡波次：${waves.map((w) => (w > 20 ? '通关' : w)).join(', ')}（平均 ${avg(waves).toFixed(1)}）`);
 console.log(`命中率 ${pct(avg(results.map((r) => r.acc)))}，爆头率 ${pct(avg(results.map((r) => r.hs)))}，移动目标命中率 ${pct(avg(results.map((r) => r.moverAcc).filter((v) => v != null)))}`);
-console.log(`平均最高连杀 ${avg(results.map((r) => r.maxCombo)).toFixed(0)}，平均星尘 ${avg(results.map((r) => r.stardust)).toFixed(0)}`);
+const T = 'DCBAS';
+console.log(`平均评级 ${T[Math.round(avg(results.map((r) => r.avgTier)))]}（${avg(results.map((r) => r.avgTier)).toFixed(2)}），最高评级 ${results.map((r) => T[r.peakTier]).join('')}，平均星尘 ${avg(results.map((r) => r.stardust)).toFixed(0)}`);
 const hurt = {};
 for (const r of results) for (const [k, v] of Object.entries(r.hurtBy)) hurt[k] = (hurt[k] || 0) + v;
 const hurtTotal = Object.values(hurt).reduce((a, b) => a + b, 0) || 1;

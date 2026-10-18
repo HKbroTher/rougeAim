@@ -1,15 +1,15 @@
 // 主控制器：状态机（标题 → 战斗 → 强化三选一 → 商店 → … → 结算）、输入、射击、波次与强化效果。
 import * as THREE from '../vendor/three.module.min.js';
-import { PLAYER, WEAPON, WAVES, ARENA, SETTLEMENT, FOCUS, THREAT, MOVEMENT, KEEPSAKES, rollMove } from './config.js';
+import { PLAYER, WEAPON, WAVES, ARENA, SETTLEMENT, FOCUS, THREAT, MOVEMENT, rollMove } from './config.js';
 import { SCHOOLS } from './upgrades.js';
 import { Bot } from './bots.js';
 import { UI } from './ui.js';
 import { createWorld } from './world.js';
 import { initAudio, setVolume, sfx } from './audio.js';
-import { loadSave, persist, resetSave, buyUpgrade, buyKeepsake, selectKeepsake, recordRun } from './meta.js';
-import { META_UPGRADES } from './config.js';
+import { loadSave, persist, resetSave, buyKeepsake, selectKeepsake, recordRun, unlockCard, toggleCard, buyCapacity } from './meta.js';
+import { CARDS } from './config.js';
 import * as R from './run.js';
-import { SimAimer, SKILLS } from './simaim.js';
+import { SimAimer, SKILLS, STYLES } from './simaim.js';
 import { gameSens, radPerCount, sensInSource } from './sens.js';
 
 const params = new URLSearchParams(location.search);
@@ -49,7 +49,7 @@ export class Game {
     this.toTitle();
     this.last = performance.now();
     requestAnimationFrame((t) => this.frame(t));
-    if (DEBUG) Object.assign(window, { game: this, SimAimer, SKILLS, META_UPGRADES });
+    if (DEBUG) Object.assign(window, { game: this, SimAimer, SKILLS, STYLES, CARDS });
   }
 
   // ---------------- 输入 ----------------
@@ -142,8 +142,16 @@ export class Game {
       case 'start':
         this.startRun();
         break;
-      case 'upgrade':
-        if (buyUpgrade(this.save, data.id)) sfx.buy(); else sfx.deny();
+      case 'unlockCard':
+        if (unlockCard(this.save, data.id)) sfx.buy(); else sfx.deny();
+        this.ui.title(this.save, this.titleTab, this.rawStatus);
+        break;
+      case 'toggleCard':
+        if (toggleCard(this.save, data.id)) sfx.buy(); else sfx.deny();
+        this.ui.title(this.save, this.titleTab, this.rawStatus);
+        break;
+      case 'buyCapacity':
+        if (buyCapacity(this.save)) sfx.buy(); else sfx.deny();
         this.ui.title(this.save, this.titleTab, this.rawStatus);
         break;
       case 'buyKeepsake':
@@ -259,12 +267,12 @@ export class Game {
     this.pitch = 0;
     this.reactions = [];
     this.clearBots();
-    // 开局三选一：星尘工坊「开局补给」、遗物 3 级的流派三选一
+    // 开局三选一：命盘里的流派徽记卡和「开局补给」
     this.openingPicks = [];
     const run = this.run;
-    const ks = KEEPSAKES.find((k) => k.id === run.keepsake);
-    if (ks && ks.school && run.keepsakeLv >= 3) {
-      this.openingPicks.push({ title: `${ks.name} · 选择一个${SCHOOLS[ks.school].name}强化`, opts: { school: ks.school } });
+    for (const c of CARDS) {
+      const school = { h_badge: 'head', s_badge: 'spray', t_badge: 'time' }[c.id];
+      if (school && R.hasCard(run, c.id)) this.openingPicks.push({ title: `${c.name} · 选择一个${SCHOOLS[school].name}强化`, opts: { school } });
     }
     if (run.extraChoice) this.openingPicks.push({ title: '开局补给 · 选择一个强化', opts: {} });
     this.nextOpeningPick();
@@ -376,22 +384,23 @@ export class Game {
     this.ui.showHud(false);
     const s = run.stats;
     const settlement = {
-      combo: Math.floor(SETTLEMENT.comboSqrt * Math.sqrt(run.maxCombo)),
-      headshots: Math.floor(s.headshots * SETTLEMENT.perHeadshot),
+      rating: Math.floor(SETTLEMENT.perTierWave * run.ratingScore),
+      kills: Math.floor(s.kills * SETTLEMENT.perKill),
       depth: run.waveIndex * SETTLEMENT.perWave,
       victory: victory ? SETTLEMENT.victoryBonus : 0,
       shop: run.stardustFromShop,
     };
-    if (run.keepsake === 'blank') {
-      settlement.blank = Math.round(0.25 * (settlement.combo + settlement.headshots + settlement.depth + settlement.victory));
-    }
+    const perf = settlement.rating + settlement.kills + settlement.depth + settlement.victory;
+    if (run.keepsake === 'blank') settlement.blank = Math.round(0.25 * perf);
+    if (R.hasCard(run, 'w_star')) settlement.star = Math.round(0.15 * perf);
     const stardust = Object.values(settlement).reduce((a, b) => a + b, 0);
     const reactions = this.reactions || [];
     const summary = {
       date: Date.now(),
       victory,
       waves: run.waveIndex,
-      maxCombo: run.maxCombo,
+      peakTier: run.rating.peak,
+      avgTier: run.waveIndex ? run.ratingScore / run.waveIndex : 0,
       headshots: s.headshots,
       kills: s.kills,
       shots: s.shots,
@@ -481,6 +490,7 @@ export class Game {
     this.yawHist.push({ t: this.time, yaw: this.yaw });
     while (this.yawHist.length && this.yawHist[0].t < this.time - 0.4) this.yawHist.shift();
     this.flickReady = R.has(run, 'flickmaster') && this.yawHist.some((h) => Math.abs(h.yaw - this.yaw) >= Math.PI / 3);
+    R.tickRating(run, dt);
 
     // 视野检测：用于「甩枪反应」统计
     this.camera.updateMatrixWorld();
@@ -511,14 +521,13 @@ export class Game {
     // 换弹与射击（真实时间）
     if (R.tickReload(run, dt)) sfx.reloadDone();
     this.cooldown -= dt;
-    let fired = false;
-    if (this.firing && this.cooldown <= 0 && !R.reloading(run) && run.ammo > 0) {
+    const canFire = this.firing && !R.reloading(run) && run.ammo > 0;
+    if (canFire && this.cooldown <= 0) {
       this.shoot();
-      fired = true;
       this.cooldown = R.fireInterval(run, WEAPON.fireInterval);
       if (run.ammo <= 0) this.tryReload(false);
     }
-    R.tickHeat(run, dt, fired);
+    R.tickFire(run, dt, canFire);
 
     if (this.state !== 'combat') return;
     this.ui.updateHud(run, `${this.waveDef.name} / ${WAVES.length}`, this.bots.length + this.spawnQueue.length, { flick: this.flickReady });
@@ -542,11 +551,8 @@ export class Game {
       this.world.fx.tracer(muzzle, end, 0x8899bb);
       const near = this.nearestToCrosshair(0.09);
       if (near && near.mobile) run.stats.moverMisses++;
-      const res = R.registerMiss(run);
-      if (res === 'broken') { sfx.comboBreak(); this.ui.comboBreak(); }
-      else if (res === 'safety') this.floatCenter('保险栓', 'info');
-      else if (res === 'halved') { sfx.miss(); this.floatCenter('连杀减半', 'info'); }
-      else sfx.miss();
+      R.registerMiss(run);
+      sfx.miss();
       return;
     }
     const { bot, part } = hit.object.userData;
@@ -570,30 +576,21 @@ export class Game {
       ec.at = this.time;
       execBonus = ec.bonus;
     }
-    // 连续命中同一目标
-    const tr = run.track;
-    if (tr.botId === bot.id) {
-      tr.count++;
-      const gap = this.time - tr.lastHit;
-      if (gap < 0.3) tr.time += gap;
-    } else {
-      tr.botId = bot.id;
-      tr.count = 1;
-      tr.time = 0;
-    }
-    tr.lastHit = this.time;
+    // 持续命中同一个目标（跟枪护盾）：两次命中间隔 < 0.35 秒就累计时间，中间打空不打断
+    const gap = this.time - (bot.lastHitAt ?? -9);
+    bot.trackTime = gap < 0.35 ? (bot.trackTime || 0) + gap : 0;
+    bot.lastHitAt = this.time;
     bot.hitsTaken = (bot.hitsTaken || 0) + 1;
 
     const dmg = this.shotDamage(bot, head, { flick, calm, execBonus });
-    R.registerHit(run, head, { bonusCombo: flick ? 3 : 0 });
+    R.registerHit(run, head);
     this.ui.hitmarker(head);
     if (head) sfx.headshot(); else sfx.hit();
     if (flick) this.floatCenter('甩枪！', 'head');
-    if (head) R.onHeadshotInBulletTime(run);
     if (run.bt) run.bt.hitBots.add(bot);
 
-    if (R.has(run, 'suppress')) { bot.suppress = Math.min(5, tr.count); bot.lastHitAt = this.time; }
-    if (R.has(run, 'trackshield') && !run.trackShieldUsed && tr.time >= 2) {
+    if (R.has(run, 'suppress')) bot.suppress = Math.min(5, (bot.suppress || 0) + 1);
+    if (R.has(run, 'trackshield') && !run.trackShieldUsed && bot.trackTime >= 2) {
       run.trackShieldUsed = true;
       run.shield++;
       sfx.shield();
@@ -602,26 +599,47 @@ export class Game {
     const fullHeat = R.has(run, 'overheat') && run.heat >= 20;
     if (fullHeat) bot.burn = { left: 2, acc: 0 };
 
-    if (bot.damage(dmg)) this.killBot(bot, { head, onetap: wasFull, fullHeat });
+    this.hurtBot(bot, dmg, { head, onetap: wasFull, fullHeat, bonusRating: flick ? 6 : 0 });
     if (head && R.has(run, 'headblast')) this.headBlast(bot.position.clone(), bot);
     if (head && R.has(run, 'pierce')) this.pierce(hit.point, this.raycaster.ray.direction.clone(), bot, dmg);
+  }
+
+  // 对 bot 造成伤害：评级、专注都按实际扣掉的血量算；打死则结算击杀
+  hurtBot(bot, dmg, ctx = {}) {
+    if (bot.dead || dmg <= 0) return false;
+    const run = this.run;
+    if (ctx.indirect && R.has(run, 'aftershock')) dmg *= 1.5;
+    const applied = Math.min(dmg, bot.hp);
+    const killed = bot.damage(dmg);
+    R.onDamage(run, applied, killed, ctx.bonusRating || 0);
+    if (killed) this.killBot(bot, ctx);
+    return killed;
   }
 
   // 一发子弹的伤害。所有加成都只作用于已经命中的子弹
   shotDamage(bot, head, { flick = false, calm = false, execBonus = 0 } = {}) {
     const run = this.run;
-    const guillotine = R.has(run, 'guillotine');
-    if (!head && guillotine) return 0;
-    let d = WEAPON.damage;
-    if (head) d *= guillotine ? 4 : WEAPON.headshotMultiplier;
-    if (head && R.has(run, 'lethal')) d += 1;
-    if (head) d += execBonus;
+    let d = WEAPON.damage * (1 + 0.08 * R.lv(run, 'caliber'));
+    if (head) {
+      d *= R.headMultiplier(run);
+      if (R.has(run, 'lethal')) d += 1.5;
+      if (R.hasCard(run, 'h_aim')) d += 0.5;
+      d += execBonus;
+      if (R.has(run, 'hawkeye') && bot.distance > 15) d *= 1.5;
+      if (flick) d *= 2;
+    } else {
+      if (R.has(run, 'hollow')) d *= 1.5;
+      if (R.has(run, 'guillotine')) d *= 0.5;
+    }
     if (calm) d *= 2;
     d *= R.tempDamageMul(run);
-    if (flick) d *= 3;
-    if (R.has(run, 'overheat')) d *= 1 + 0.04 * run.heat;
-    if (R.has(run, 'rend') && run.track.count % 4 === 0) d *= 3;
-    if (R.has(run, 'shred') && bot.type === 'heavy' && bot.hitsTaken >= 3) d += 1;
+    if (R.inBulletTime(run) && R.has(run, 'freezeframe')) d *= 1.4;
+    if (R.has(run, 'overheat')) d *= 1 + 0.03 * run.heat;
+    if (R.has(run, 'rend') && bot.hitsTaken % 3 === 0) d *= 2.5;
+    if (R.has(run, 'shred')) {
+      if (bot.hitsTaken >= 2) d += 1;
+      if (bot.type === 'heavy') d *= 1.5;
+    }
     return d;
   }
 
@@ -639,9 +657,9 @@ export class Game {
       const { bot, part } = h.object.userData;
       const head = part === 'head';
       this.world.fx.tracer(origin, h.point, 0xffd166);
-      const dmg = head ? Math.ceil(shotDmg * 0.75) : (R.has(run, 'guillotine') ? 0 : 1);
+      const dmg = head ? shotDmg * 0.75 : WEAPON.damage * (R.has(run, 'guillotine') ? 0.5 : 1);
       R.registerHit(run, head, { extra: true });
-      if (bot.damage(dmg)) this.killBot(bot, { head, indirect: true });
+      this.hurtBot(bot, dmg, { head, indirect: true });
       exclude.add(bot);
       origin = h.point.clone().addScaledVector(dir, 0.05);
       if (!head) break;
@@ -655,7 +673,7 @@ export class Game {
       burn.acc -= 0.5;
       burn.left -= 0.5;
       this.world.fx.burst(bot.headWorld, 0xff6b35, 4, 2);
-      if (bot.damage(1)) this.killBot(bot, { indirect: true });
+      this.hurtBot(bot, 1, { indirect: true });
     }
     if (burn.left <= 0) bot.burn = null;
   }
@@ -666,10 +684,10 @@ export class Game {
     const run = this.run;
     let base = bot.def.gold;
     if (ctx.onetap && R.has(run, 'bounty')) base += 2;
+    if (ctx.onetap && R.hasCard(run, 'h_flick')) base += 1;
     const glance = ctx.head && R.has(run, 'glance') && bot.offscreenAt != null && this.time - bot.offscreenAt <= 1;
     const gold = R.killGold(run, base, glance ? 2 : 1);
     if (ctx.onetap && R.has(run, 'onetap')) R.refundAmmo(run, 2);
-    if (ctx.indirect && R.has(run, 'aftershock')) R.addCombo(run, 2);
     R.onKillInBulletTime(run);
     const pos = bot.headWorld;
     this.world.fx.burst(pos, bot.def.color, bot.type === 'heavy' ? 26 : 14);
@@ -692,6 +710,14 @@ export class Game {
     if (R.has(this.run, 'stasisround')) {
       for (const b of bt.hitBots) if (!b.dead) b.slowTime = Math.max(b.slowTime, 1);
     }
+    if (R.has(this.run, 'reckoning')) {
+      for (const b of bt.hitBots) {
+        if (b.dead) continue;
+        this.world.fx.burst(b.headWorld, 0xc77dff, 10, 3);
+        this.hurtBot(b, 4, { indirect: true });
+      }
+    }
+    if (bt.highlight) this.floatCenter('高光时刻：评级提升', 'head');
     if (this.run.debtTime > 0) this.floatCenter('时间债：敌人加速', 'warn');
   }
 
@@ -699,7 +725,7 @@ export class Game {
     this.world.fx.shockwave(center, 3, 0xffd166);
     for (const b of [...this.bots]) {
       if (b === source || b.dead) continue;
-      if (b.position.distanceTo(center) < 3 && b.damage(1)) this.killBot(b, { indirect: true });
+      if (b.position.distanceTo(center) < 3) this.hurtBot(b, 2, { indirect: true });
     }
   }
 
@@ -716,6 +742,7 @@ export class Game {
     (run.stats.hurtBy ||= {})[key] = (run.stats.hurtBy[key] || 0) + 1;
     if (res.absorbed) { sfx.shield(); this.floatCenter('护盾抵挡', 'info'); }
     else { sfx.hurt(); this.ui.hurt(rel); }
+    if (res.revived) { sfx.focus(); this.ui.banner('不屈'); }
     if (R.has(run, 'recoilarmor')) {
       for (const b of this.bots) if (!b.dead && b.distance < 8) b.knockback(36);
       this.world.fx.shockwave(new THREE.Vector3(0, 0, 0), 8, 0x4cc9f0);

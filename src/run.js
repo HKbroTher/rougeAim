@@ -1,40 +1,45 @@
 // 单局状态与规则（不依赖渲染，便于单测和平衡模拟）。
-import { PLAYER, WEAPON, COMBO, FOCUS, SHOP, WAVES, KEEPSAKES, WELL, WELL_ITEMS } from './config.js';
+import { PLAYER, WEAPON, RATING, FOCUS, SHOP, WAVES, KEEPSAKES, WELL, WELL_ITEMS } from './config.js';
 import { UPGRADES, BASE_MAX_LEVEL } from './upgrades.js';
-import { upgradeLevel, unlockedUpgrades, keepsakeLevel } from './meta.js';
+import { unlockedUpgrades, keepsakeLevel, activeCards } from './meta.js';
 
 export function createRun(save) {
-  const maxHp = PLAYER.maxHp + 10 * upgradeLevel(save, 'vitality');
+  const cards = activeCards(save);
+  const card = (id) => cards.has(id);
+  const maxHp = PLAYER.maxHp + (card('v_body') ? 15 : 0) + (card('v_heart') ? 30 : 0);
   const keepsake = save.keepsake && keepsakeLevel(save, save.keepsake) > 0 ? save.keepsake : null;
   const run = {
     hp: maxHp,
     maxHp,
-    shield: upgradeLevel(save, 'shield') > 0 ? 1 : 0,
-    gold: 15 * upgradeLevel(save, 'stake'),
-    combo: 0,
-    maxCombo: 0,
+    cards,
+    shield: card('v_shield') ? 1 : 0,
+    gold: card('e_stake') ? 25 : 0,
+    // 火力评级：tier 0..4（D..S），points 当前等级的进度，idle 多久没造成伤害
+    rating: { tier: 0, points: 0, idle: 0, peak: 0 },
+    ratingScore: 0,  // 每波结束时的评级累加（结算星尘）
+    reviveUsed: false,
     focus: 0,
     focusTime: 0,
     focusTotal: 0,   // 本次子弹时间的总时长（HUD 用）
     debtTime: 0,     // 时间债：敌人加速的剩余时间
-    bt: null,        // 本次子弹时间的统计：{ kills, ext, bankExt }
+    bt: null,        // 本次子弹时间的统计：{ kills, dmg, ext, bankExt, hitBots }
     ammo: 0,
     reloadLeft: 0,
     reloadTotal: 0,
     heat: 0,         // 过热枪管
     idle: 0,         // 停火时长（过热衰减、静心）
-    hitStreak: 0,    // 连续命中次数（弹链）
-    track: { botId: null, count: 0, time: 0, lastHit: -9 }, // 连续命中同一目标（撕裂、跟枪护盾）
+    sprayTime: 0,    // 持续开火时长（过热、弹链、预热）
+    beltAcc: 0,
     trackShieldUsed: false,
     execChain: { botId: null, at: -9, bonus: 0 },
     ups: {},         // 强化 id -> 等级
     keepsake,
-    keepsakeLv: keepsake ? keepsakeLevel(save, keepsake) : 0,
+    keepsakeLv: keepsake ? 1 : 0,
     unlocked: unlockedUpgrades(save),
-    extraChoice: upgradeLevel(save, 'extraChoice') > 0,
+    extraChoice: card('e_supply'),
     waveIndex: 0,
     wavesSinceCore: 0,
-    rerolls: SHOP.rerollTokensStart + upgradeLevel(save, 'fates'), // 命运骰
+    rerolls: SHOP.rerollTokensStart + (card('e_fate') ? 1 : 0) + (card('w_star') ? 1 : 0), // 命运骰
     temp: [],        // 卡戎之井的临时效果：{ id, waves }
     rewardsTaken: 0,
     healBuys: 0,
@@ -43,7 +48,7 @@ export function createRun(save) {
     stardustFromShop: 0,
     safetyUsed: false,
     chainStacks: 0,
-    stats: { shots: 0, hits: 0, headshots: 0, kills: 0, goldEarned: 0, damageTaken: 0, misses: 0, comboBreaks: 0, reloads: 0, moverHits: 0, moverMisses: 0 },
+    stats: { shots: 0, hits: 0, headshots: 0, kills: 0, goldEarned: 0, damageTaken: 0, misses: 0, tierDrops: 0, reloads: 0, moverHits: 0, moverMisses: 0, damage: 0 },
     shopVisits: [],
     waveLog: [], // 每波的血量、命中、金币变化，用于平衡分析
   };
@@ -52,35 +57,82 @@ export function createRun(save) {
 }
 
 export const lv = (run, id) => run.ups[id] || 0;
+export const hasCard = (run, id) => run.cards.has(id);
 export const hasTemp = (run, id) => run.temp.some((t) => t.id === id);
 export const tempDamageMul = (run) => (hasTemp(run, 'wrath') ? 1.2 : 1);
 export const has = (run, id) => lv(run, id) > 0;
-export const keepsakeIs = (run, id, minLv = 1) => run.keepsake === id && run.keepsakeLv >= minLv;
+export const keepsakeIs = (run, id) => run.keepsake === id;
 export const inBulletTime = (run) => run.focusTime > 0;
 
-export function multiplier(run) {
-  return Math.min(COMBO.maxMult, 1 + Math.floor(run.combo) * COMBO.multPerCombo);
+// ---------------- 火力评级 ----------------
+
+export const tierDef = (run) => RATING.tiers[run.rating.tier];
+const MAX_TIER = RATING.tiers.length - 1;
+
+function addRating(run, pts) {
+  const r = run.rating;
+  r.points += pts;
+  while (r.tier < MAX_TIER && r.points >= RATING.tiers[r.tier].need) {
+    r.points -= RATING.tiers[r.tier].need;
+    r.tier++;
+  }
+  if (r.tier === MAX_TIER) r.points = Math.min(r.points, RATING.tiers[MAX_TIER].need);
+  r.peak = Math.max(r.peak, r.tier);
+}
+
+function dropTier(run) {
+  const r = run.rating;
+  if (r.tier === 0) { r.points = 0; return; }
+  r.tier--;
+  r.points = RATING.tiers[r.tier].need * RATING.dropKeep;
+  run.stats.tierDrops++;
+}
+
+export function raiseTier(run) {
+  const r = run.rating;
+  if (r.tier < MAX_TIER) { r.tier++; r.points = 0; r.peak = Math.max(r.peak, r.tier); }
+}
+
+// 每帧：一段时间没造成伤害就慢慢回落（稳定火力：不回落）
+export function tickRating(run, dt) {
+  const r = run.rating;
+  r.idle += dt;
+  if (has(run, 'steady') || r.idle < RATING.decayDelay) return;
+  r.points -= RATING.decayRate * Math.min(dt, r.idle - RATING.decayDelay);
+  if (r.points < 0) {
+    if (r.tier === 0) r.points = 0;
+    else dropTier(run);
+  }
 }
 
 // ---------------- 武器 ----------------
 
+export function headMultiplier(run) {
+  let m = has(run, 'guillotine') ? 3 : WEAPON.headshotMultiplier;
+  if (has(run, 'precision')) m += 0.75;
+  if (keepsakeIs(run, 'hunter')) m += 0.25;
+  return m;
+}
+
 export function fireInterval(run, base) {
   let rate = (1 + 0.08 * run.chainStacks) * (1 + 0.05 * lv(run, 'trigger'));
-  if (has(run, 'rapid')) rate *= 1.1;
-  if (inBulletTime(run) && has(run, 'overclock')) rate *= 1.2;
+  if (has(run, 'rapid')) rate *= 1.15;
+  if (has(run, 'spinup')) rate *= 1 + 0.08 * Math.min(5, Math.floor(run.sprayTime / 0.5));
+  if (inBulletTime(run) && has(run, 'overclock')) rate *= 1.3;
   return base / rate;
 }
 
 export function magSize(run) {
   let m = has(run, 'drum') ? 24 : WEAPON.magSize;
   m += 2 * lv(run, 'mag');
+  if (hasCard(run, 's_mag')) m += 2;
   if (keepsakeIs(run, 'drum')) m += 3;
   if (hasTemp(run, 'ammo')) m += 4;
   return m;
 }
 
 export function baseReloadTime(run) {
-  return (has(run, 'drum') ? 3.2 : WEAPON.reloadTime) * (1 - 0.08 * lv(run, 'quick'));
+  return (has(run, 'drum') ? 3.2 : WEAPON.reloadTime) * (1 - 0.08 * lv(run, 'quick')) * (hasCard(run, 's_suppress') ? 0.88 : 1);
 }
 
 export const reloading = (run) => run.reloadLeft > 0;
@@ -94,11 +146,12 @@ export function refundAmmo(run, n) {
 export function startReload(run, manual = false) {
   if (reloading(run) || run.ammo >= magSize(run)) return false;
   run.stats.reloads++;
+  const cool = has(run, 'coolant') && run.heat >= 20;
   const instant =
     (inBulletTime(run) && has(run, 'timeslit')) ||
     (manual && has(run, 'tacreload') && run.ammo >= magSize(run) * 0.5) ||
-    (has(run, 'coolant') && run.heat >= 20);
-  if (has(run, 'coolant') && run.heat >= 20) run.heat = 0;
+    cool;
+  if (cool) run.heat -= 10;
   if (instant) {
     run.ammo = magSize(run);
     return 'instant';
@@ -120,13 +173,24 @@ export function tickReload(run, dt) {
   return true;
 }
 
-// 过热：停火衰减
-export function tickHeat(run, dt, firedThisFrame) {
-  if (firedThisFrame) { run.idle = 0; return; }
+// 持续开火：active = 按住左键且枪能出膛（没在换弹、有子弹）。打空也算在开火。
+// 驱动过热、弹链、预热；松手或换弹 0.4 秒后中断。
+export function tickFire(run, dt, active) {
+  if (active) {
+    run.idle = 0;
+    run.sprayTime += dt;
+    if (has(run, 'overheat')) run.heat = Math.min(20, run.heat + 10 * dt);
+    if (has(run, 'beltfeed')) {
+      run.beltAcc += dt;
+      while (run.beltAcc >= 0.4) { run.beltAcc -= 0.4; refundAmmo(run, 1); }
+    }
+    return;
+  }
   run.idle += dt;
-  if (!has(run, 'overheat') || run.heat <= 0) return;
-  if (has(run, 'heatsink')) return;
-  if (run.idle >= 1) run.heat = Math.max(0, run.heat - 4 * dt);
+  if (run.idle >= 0.4) { run.sprayTime = 0; run.beltAcc = 0; }
+  if (!has(run, 'overheat') || run.heat <= 0 || run.idle < 0.5) return;
+  if (has(run, 'heatsink') && reloading(run)) return;
+  run.heat = Math.max(0, run.heat - (has(run, 'heatsink') ? 4 : 8) * dt);
 }
 
 // ---------------- 专注 / 子弹时间 ----------------
@@ -136,7 +200,7 @@ export function focusMax(run) {
 }
 
 export function focusDuration(run) {
-  const bonus = has(run, 'focuslens') ? 0.5 : 0;
+  const bonus = (has(run, 'focuslens') ? 0.5 : 0) + (hasCard(run, 't_debt') ? 0.5 : 0);
   let d = has(run, 'stasis') ? 1.2 + bonus * 0.5 : FOCUS.duration + bonus;
   if (has(run, 'fragment')) d *= 0.5;
   return d;
@@ -149,7 +213,7 @@ export function bulletTimeScale(run) {
 
 function addFocus(run, amount) {
   if (inBulletTime(run)) return;
-  let gain = amount * (has(run, 'focuslens') ? 1.3 : 1) * (1 + 0.15 * lv(run, 'flow'));
+  const gain = amount * (has(run, 'focuslens') ? 1.4 : 1) * (1 + 0.15 * lv(run, 'flow')) * (hasCard(run, 't_flow') ? 1.15 : 1);
   run.focus = Math.min(focusMax(run), run.focus + gain);
 }
 
@@ -165,7 +229,7 @@ export function activateFocus(run) {
   run.focus = 0;
   run.focusTime = focusDuration(run) * frac;
   run.focusTotal = run.focusTime;
-  run.bt = { kills: 0, ext: 0, bankExt: 0, hitBots: new Set() };
+  run.bt = { kills: 0, dmg: 0, bankAcc: 0, ext: 0, bankExt: 0, hitBots: new Set() };
   return true;
 }
 
@@ -176,70 +240,59 @@ function extendBulletTime(run, sec) {
   run.focusTotal += sec * k;
 }
 
-// 子弹时间结束时调用，返回需要的后续处理
+// 子弹时间结束时调用，返回本次统计（highlight = 高光时刻触发）
 export function endBulletTime(run) {
-  const bt = run.bt || { kills: 0, hitBots: new Set() };
-  if (has(run, 'echo') && bt.kills >= 4) run.focus = Math.min(focusMax(run), focusMax(run) * 0.25);
+  const bt = run.bt || { kills: 0, dmg: 0, hitBots: new Set() };
+  if (has(run, 'echo') && bt.kills >= 3) run.focus = Math.min(focusMax(run), focusMax(run) * 0.3);
   if (has(run, 'timedebt')) run.debtTime = run.focusTotal;
+  bt.highlight = has(run, 'highlight') && bt.dmg >= 40;
+  if (bt.highlight) raiseTier(run);
   run.bt = null;
   return bt;
 }
 
-// ---------------- 命中 / 打空 ----------------
+// ---------------- 命中 / 打空 / 伤害 ----------------
 
-function gainCombo(run, n) {
-  run.combo += has(run, 'gambler') ? n * 0.5 : n;
-  run.maxCombo = Math.max(run.maxCombo, Math.floor(run.combo));
-}
-
-export function addCombo(run, n) {
-  gainCombo(run, n);
-}
-
-// extra：穿透等额外命中，不计入命中统计（否则命中率会超过 100%）
-export function registerHit(run, headshot, { extra = false, bonusCombo = 0 } = {}) {
-  if (!extra) {
-    run.stats.hits++;
-    if (headshot) run.stats.headshots++;
-  }
-  let gain = COMBO.perHit + bonusCombo;
+// 一次命中的统计。extra：穿透等额外命中，不计入命中统计（否则命中率会超过 100%）
+export function registerHit(run, headshot, { extra = false } = {}) {
+  if (extra) return;
+  run.stats.hits++;
   if (headshot) {
-    gain += COMBO.perHeadshotBonus + (has(run, 'hawkeye') ? 1 : 0) + (keepsakeIs(run, 'hunter') ? 1 : 0);
+    run.stats.headshots++;
     if (has(run, 'chainhead')) run.chainStacks = Math.min(4, run.chainStacks + 1);
   } else {
     run.chainStacks = 0;
   }
-  gainCombo(run, gain);
-  addFocus(run, headshot ? FOCUS.perHeadshot : FOCUS.perHit);
-  if (extra) return;
-  run.hitStreak++;
-  if (has(run, 'beltfeed') && run.hitStreak % 6 === 0) refundAmmo(run, 1);
-  if (has(run, 'overheat')) run.heat = Math.min(20, run.heat + 1);
 }
 
-// 返回 'safety' | 'halved' | 'broken' | 'none'
 export function registerMiss(run) {
   run.stats.misses++;
   run.chainStacks = 0;
-  run.hitStreak = 0;
-  run.track.count = 0;
-  run.track.botId = null;
-  if (has(run, 'overheat')) run.heat = Math.max(0, run.heat - 5);
-  if (run.combo < 1) return 'none';
-  if (has(run, 'safety') && !run.safetyUsed) {
-    run.safetyUsed = true;
-    return 'safety';
-  }
-  if (has(run, 'gambler')) {
-    run.combo = Math.floor(run.combo / 2);
-    return 'halved';
-  }
-  run.combo = 0;
-  run.stats.comboBreaks++;
-  return 'broken';
+  if (!has(run, 'steady')) addRating(run, -Math.min(run.rating.points, RATING.missPenalty));
 }
 
-// 子弹时间里的击杀结算（余韵、定格），返回额外连杀
+// 对敌人实际造成的伤害（溢出不算），所有来源（子弹、穿透、震爆、灼烧）都走这里。
+// 评级与专注都按伤害增长，所以爆头和身体按各自的伤害算，不再额外偏向爆头。
+export function onDamage(run, applied, killed, bonusRating = 0) {
+  run.stats.damage += applied;
+  run.rating.idle = 0;
+  addRating(run, applied + (killed ? RATING.killBonus : 0) + bonusRating);
+  addFocus(run, applied * FOCUS.perDamage);
+  const bt = inBulletTime(run) && run.bt;
+  if (!bt) return;
+  bt.dmg += applied;
+  if (has(run, 'timebank') && bt.bankExt < 1.5) {
+    bt.bankAcc += applied;
+    while (bt.bankAcc >= 10 && bt.bankExt < 1.5) {
+      bt.bankAcc -= 10;
+      const add = Math.min(0.15, 1.5 - bt.bankExt);
+      bt.bankExt += add;
+      extendBulletTime(run, add);
+    }
+  }
+}
+
+// 子弹时间里的击杀结算（余韵）
 export function onKillInBulletTime(run) {
   if (!inBulletTime(run) || !run.bt) return;
   run.bt.kills++;
@@ -248,23 +301,18 @@ export function onKillInBulletTime(run) {
     run.bt.ext += add;
     extendBulletTime(run, add);
   }
-  if (has(run, 'freezeframe')) gainCombo(run, 3);
 }
 
-export function onHeadshotInBulletTime(run) {
-  if (!inBulletTime(run) || !run.bt || !has(run, 'timebank') || run.bt.bankExt >= 1.5) return;
-  const add = Math.min(0.15, 1.5 - run.bt.bankExt);
-  run.bt.bankExt += add;
-  extendBulletTime(run, add);
+export function goldMultiplier(run) {
+  return tierDef(run).gold;
 }
 
 export function killGold(run, base, extraMul = 1) {
-  const mult = multiplier(run);
-  const goldMult = 1 + (mult - 1) * COMBO.goldMultScale;
-  let g = base * goldMult * extraMul * (1 + 0.08 * lv(run, 'fortune'));
+  let g = base * goldMultiplier(run) * extraMul * (1 + 0.08 * lv(run, 'fortune'));
   if (hasTemp(run, 'greed')) g *= 1.4;
-  if (has(run, 'greedsight') && mult >= 3) g *= 1.5;
+  if (has(run, 'greedsight') && run.rating.tier >= 3) g *= 1.4;
   if (has(run, 'bloodpact')) g *= 1.4;
+  if (hasCard(run, 'w_gold')) g *= 1.15;
   const gold = Math.max(1, Math.round(g));
   run.gold += gold;
   run.stats.goldEarned += gold;
@@ -272,14 +320,24 @@ export function killGold(run, base, extraMul = 1) {
   return gold;
 }
 
-// 返回 { absorbed: bool, dead: bool }
+// 返回 { absorbed, dead, revived }
 export function takeDamage(run, dmg) {
   if (run.shield > 0) {
     run.shield--;
     return { absorbed: true, dead: false };
   }
+  if (hasCard(run, 'v_grit') && run.hp < run.maxHp * 0.3) dmg *= 0.65;
+  dmg = Math.round(dmg);
   run.hp = Math.max(0, run.hp - dmg);
   run.stats.damageTaken += dmg;
+  // 被碰到降一级评级（保险栓：每波第一次不降）
+  if (has(run, 'safety') && !run.safetyUsed) run.safetyUsed = true;
+  else dropTier(run);
+  if (run.hp <= 0 && hasCard(run, 'w_revive') && !run.reviveUsed) {
+    run.reviveUsed = true;
+    run.hp = Math.round(run.maxHp * 0.5);
+    return { absorbed: false, dead: false, revived: true };
+  }
   return { absorbed: false, dead: run.hp <= 0 };
 }
 
@@ -307,6 +365,10 @@ export function startWave(run) {
   run.debtTime = 0;
   run.bt = null;
   run.heat = 0;
+  run.sprayTime = 0;
+  run.beltAcc = 0;
+  run.rating.idle = 0;
+  if (hasCard(run, 'w_shield')) run.shield = Math.max(run.shield, 1);
   // 护盾强化：每波开始把护盾补到等级数（不会跨波无限累积）
   if (has(run, 'guard')) run.shield = Math.max(run.shield, lv(run, 'guard'));
   if (keepsakeIs(run, 'watch')) run.focus = Math.min(focusMax(run), run.focus + focusMax(run) * 0.3);
@@ -320,7 +382,9 @@ export function finishWave(run) {
   run.focusTime = 0;
   run.debtTime = 0;
   run.bt = null;
-  if (has(run, 'bandage')) run.hp = Math.min(run.maxHp, run.hp + 5 * lv(run, 'bandage'));
+  run.ratingScore += run.rating.tier;
+  const heal = 5 * lv(run, 'bandage') + (hasCard(run, 'v_aid') ? 6 : 0);
+  if (heal) run.hp = Math.min(run.maxHp, run.hp + heal);
   // 临时效果倒数；进入新区域送一个命运骰
   run.temp = run.temp.map((t) => ({ ...t, waves: t.waves - 1 })).filter((t) => t.waves > 0);
   if (SHOP.shopAfter.includes(run.waveIndex)) run.rerolls += SHOP.rerollTokensPerRegion;
@@ -353,7 +417,8 @@ function schoolWeights(run) {
     if (s) owned[s]++;
   }
   const w = {};
-  for (const s of Object.keys(owned)) w[s] = Math.min(3, 1 + 0.4 * owned[s]);
+  const card = { head: 'h_pierce', spray: 's_heat', time: 't_stasis' };
+  for (const s of Object.keys(owned)) w[s] = Math.min(3, 1 + 0.4 * owned[s]) * (hasCard(run, card[s]) ? 1.5 : 1);
   return w;
 }
 
@@ -437,9 +502,9 @@ export function rollRewardChoices(run, n = 3, opts = {}) {
     const alt = rollKind(run, 'base', out);
     if (alt) out[n - 1] = alt;
   }
-  // 遗物 2 级：第一次三选一保底 1 个对应流派
+  // 流派遗物：第一次三选一保底 1 个对应流派
   const ks = KEEPSAKES.find((k) => k.id === run.keepsake);
-  if (ks && ks.school && run.keepsakeLv >= 2 && run.rewardsTaken === 0 && !out.some((id) => UPGRADES[id].school === ks.school)) {
+  if (ks && ks.school && run.rewardsTaken === 0 && !out.some((id) => UPGRADES[id].school === ks.school)) {
     const id = rollKind(run, 'school', out, ks.school);
     if (id) out[0] = id;
   }
@@ -490,7 +555,7 @@ export function stardustYield(run) {
   // 兑换量随深度增长得比价格快，越深越划算
   const k = priceScale(run);
   const y = SHOP.stardustYieldBase * k * (1 + SHOP.stardustDepthBonus * (k - 1));
-  return Math.round(y * (has(run, 'starmap') ? 1.3 : 1));
+  return Math.round(y * (has(run, 'starmap') ? 1.3 : 1) * (hasCard(run, 'e_star') ? 1.2 : 1));
 }
 
 export function goldRerollPrice(run, shop) {

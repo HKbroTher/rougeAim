@@ -1,13 +1,14 @@
 // DOM 界面：HUD 与各个全屏界面。按钮通过 data-action 统一派发给 game。
 import { UPGRADES, SCHOOLS, CAT_LABEL, BASE_MAX_LEVEL } from './upgrades.js';
-import { META_UPGRADES, KEEPSAKES, BOTS, WAVES, FOCUS, SHOP, SETTLEMENT, WEAPON, WELL, WELL_ITEMS } from './config.js';
-import { upgradeLevel, nextUpgradeCost, keepsakeLevel, nextKeepsakeCost, shopStats } from './meta.js';
+import { KEEPSAKES, BOTS, WAVES, FOCUS, SHOP, SETTLEMENT, WEAPON, WELL, WELL_ITEMS, RATING, CARDS, CARD_CATS, DECK_SIZE, DECK_CAPACITY } from './config.js';
+import { keepsakeLevel, shopStats, cardUnlocked, cardEquipped, cardAwake, deckCapacity, deckUsed, nextCapacityCost, activeCards } from './meta.js';
 import * as R from './run.js';
 import { gameSens, cm360, equivalents, GAME_YAW, FOV_PRESETS } from './sens.js';
 
 const $ = (id) => document.getElementById(id);
 
-const KIND_LABEL = { stat: '宽容度', talent: '开局选择', unlock: '解锁' };
+const TIER = (i) => RATING.tiers[i] || RATING.tiers[0];
+const tierBadge = (i) => (i == null ? '—' : `<b style="color:${TIER(i).color}">${TIER(i).id}</b>`);
 const SPEND_LABEL = { heal: '治疗', upgrade: '强化', stardust: '星尘', reroll: '刷新', well: '临时道具' };
 
 export class UI {
@@ -23,7 +24,7 @@ export class UI {
       const t = e.target;
       if (t.dataset.setting) onAction('setting', { key: t.dataset.setting, value: t.type === 'checkbox' ? t.checked : t.value });
     });
-    this.lastMultClass = '';
+    this.lastTier = null;
   }
 
   show(html) {
@@ -74,6 +75,7 @@ export class UI {
 
   showHud(on) {
     this.hud.hidden = !on;
+    this.lastTier = null;
   }
 
   // ---------------- 标题 / 局外 ----------------
@@ -81,31 +83,36 @@ export class UI {
   title(save, tab = 'play', rawStatus = 'unknown') {
     this.rawStatus = rawStatus;
     const tabs = [
-      ['play', '开始'], ['workshop', '星尘工坊'], ['profile', '枪法档案'], ['tuning', '调参数据'], ['settings', '设置'],
+      ['play', '开始'], ['deck', '命盘'], ['profile', '枪法档案'], ['tuning', '调参数据'], ['settings', '设置'],
     ];
     const body = {
       play: () => this.titlePlay(save),
-      workshop: () => this.titleWorkshop(save),
+      deck: () => this.titleDeck(save),
       profile: () => this.titleProfile(save),
       tuning: () => this.titleTuning(save),
       settings: () => this.titleSettings(save),
     }[tab]();
+    const refund = save.refunded ? `<div class="ok-box">命盘取代了星尘工坊：旧工坊和遗物升级的花费已全部退还，共 <span class="stardust">✦ ${save.refunded}</span>。</div>` : '';
+    save.refunded = 0;
     this.show(`
-      <div class="card">
-        <div class="row">
+      <div class="card crt title-card">
+        <div class="boot small">&gt; ROGUEAIM.EXE — 瞄准训练终端 v0.2<span class="cursor">█</span></div>
+        <div class="row title-head">
           <div class="grow">
-            <h1>ROGUE<span style="color:var(--accent)">AIM</span><small>瞄准 × Roguelike 原型 v0.1</small></h1>
-            <div class="dim small">bot 从四面八方冲来，碰到就扣血。你只能转身和开枪。</div>
+            <h1 class="logo" data-text="ROGUEAIM">ROGUE<span>AIM</span></h1>
+            <div class="subtitle">第一人称纯瞄准 × ROGUELIKE　//　只能转身和开枪</div>
           </div>
-          <div class="stardust" style="font-size:22px">✦ ${save.stardust} 星尘</div>
+          <div class="stardust big-num">✦ ${save.stardust}<small>星尘</small></div>
         </div>
-        <div class="tabs">${tabs.map(([id, n]) => `<button class="tab ${id === tab ? 'on' : ''}" data-action="tab" data-tab="${id}">${n}</button>`).join('')}</div>
-        ${body}
+        <nav class="menu">${tabs.map(([id, n]) => `<button class="tab ${id === tab ? 'on' : ''}" data-action="tab" data-tab="${id}">${n}</button>`).join('')}</nav>
+        ${refund}
+        <div class="screen-body">${body}</div>
       </div>`);
   }
 
   titlePlay(save) {
-    const bots = Object.values(BOTS).map((b) => `<li><b>${b.label}</b> <span class="dim">— ${b.skill}</span></li>`).join('');
+    const bots = Object.values(BOTS).map((b) => `<li><b>${b.label}</b> <span class="dim">— ${b.hp} 血，${b.skill}</span></li>`).join('');
+    const tiers = RATING.tiers.map((t) => `<b style="color:${t.color}">${t.id}</b> ×${t.gold}`).join('　');
     return `
       <div class="cols">
         <div>
@@ -114,26 +121,26 @@ export class UI {
             <kbd>鼠标</kbd><span>360° 转动视角（站在原地不能移动）</span>
             <kbd>左键</kbd><span>射击（按住连发）</span>
             <kbd>R</kbd><span>换弹（弹匣 ${WEAPON.magSize} 发，${WEAPON.reloadTime} 秒；打空弹匣会自动换弹）</span>
-            <kbd>右键 / E / 空格</kbd><span>释放专注：${FOCUS.duration} 秒子弹时间，敌人减速到 ${Math.round(FOCUS.timeScale * 100)}%，你的转身、射速、换弹不受影响</span>
+            <kbd>右键 / E / 空格</kbd><span>释放专注：${FOCUS.duration} 秒子弹时间，敌人减速到 ${Math.round(FOCUS.timeScale * 100)}%</span>
             <kbd>Esc</kbd><span>暂停</span>
           </div>
           <h3>规则</h3>
-          <ul class="small" style="padding-left:18px;margin:0">
-            <li>连续命中提升<b>倍率</b>，倍率越高击杀掉落金币越多。<b style="color:var(--danger)">打空一枪倍率清零</b>。</li>
-            <li>爆头伤害 ×2，并额外 +1 连杀。打空的子弹同样消耗弹匣，换弹期间不能开火。</li>
-            <li>共 ${WAVES.length} 波。每波后免费三选一<b>强化</b>，再进商店：<span class="goldtxt">治疗 / 强化 / 星尘</span>。</li>
-            <li>强化分三个流派：<b style="color:${SCHOOLS.head.color}">爆头</b>、<b style="color:${SCHOOLS.spray.color}">扫射</b>、<b style="color:${SCHOOLS.time.color}">子弹时间</b>，金色的<b class="goldtxt">核心强化</b>会改变规则。</li>
-            <li>星尘是局外货币：买了这局变弱，下一局受益。越深的商店兑换越多。</li>
+          <ul class="small rules">
+            <li>身体 ${WEAPON.damage} 点伤害，爆头 ×${WEAPON.headshotMultiplier}。普通兵 ${BOTS.normal.hp} 血：3 发身体或 2 发爆头。</li>
+            <li><b>火力评级</b>随造成的伤害和击杀上升，决定金币倍率：${tiers}。打空只扣一点进度；停火太久会回落；<b style="color:var(--danger)">被碰到降一级</b>。</li>
+            <li>共 ${WAVES.length} 波。每波后免费三选一<b>强化</b>；区域结束（第 ${SHOP.shopAfter.join('、')} 波后）进<span class="goldtxt">卡戎商店</span>，路上可能遇到卡戎之井。</li>
+            <li>三个流派：<b style="color:${SCHOOLS.head.color}">爆头</b>（单发伤害）、<b style="color:${SCHOOLS.spray.color}">扫射</b>（持续火力）、<b style="color:${SCHOOLS.time.color}">子弹时间</b>（爆发窗口），金色的<b class="goldtxt">核心强化</b>会改变规则。</li>
+            <li>星尘是局外货币，在<b>命盘</b>里解锁和装备卡牌。</li>
           </ul>
         </div>
         <div>
           <h3>敌人</h3>
-          <ul class="small" style="padding-left:18px;margin:0">${bots}</ul>
+          <ul class="small rules">${bots}</ul>
           <h3>携带遗物</h3>
           ${this.keepsakePicker(save)}
-          <h3>本局加成</h3>
-          <div class="small dim">${this.metaSummary(save) || '暂无 —— 去星尘工坊看看'}</div>
-          <div style="margin-top:22px"><button class="btn primary" data-action="start">开始一局</button></div>
+          <h3>命盘（${deckUsed(save)} / ${deckCapacity(save)} 心力）</h3>
+          <div class="small dim">${this.deckSummary(save) || '还没有装备卡牌 —— 去「命盘」看看'}</div>
+          <div style="margin-top:22px"><button class="btn primary blink-hover" data-action="start">▶ 开始一局</button></div>
           <p class="small dim">点击开始后会锁定鼠标。灵敏度可在「设置」里调整。</p>
         </div>
       </div>`;
@@ -143,40 +150,70 @@ export class UI {
     const owned = KEEPSAKES.filter((k) => keepsakeLevel(save, k.id) > 0);
     const btn = (id, label, title) => `<button class="tab ${save.keepsake === id ? 'on' : ''}" data-action="keepsake" data-id="${id || ''}" title="${title}">${label}</button>`;
     const cur = KEEPSAKES.find((k) => k.id === save.keepsake);
-    const lvNow = cur ? keepsakeLevel(save, cur.id) : 0;
-    return `<div class="row" style="gap:6px">${btn(null, '不携带', '')}${owned.map((k) => btn(k.id, `${k.icon} ${k.name} Lv${keepsakeLevel(save, k.id)}`, k.levels.join('；'))).join('')}</div>
-      <div class="small dim" style="margin-top:6px">${cur ? cur.levels.slice(0, lvNow).map((t, i) => `Lv${i + 1}：${t}`).join('<br>') : '每局开局选 1 个遗物带进去。'}</div>`;
+    return `<div class="row" style="gap:6px">${btn(null, '不携带', '')}${owned.map((k) => btn(k.id, `${k.icon} ${k.name}`, k.desc)).join('')}</div>
+      <div class="small dim" style="margin-top:6px">${cur ? cur.desc : '每局开局选 1 个遗物带进去。更多遗物在「命盘」页购买。'}</div>`;
   }
 
-  metaSummary(save) {
-    return META_UPGRADES.filter((u) => upgradeLevel(save, u.id) > 0)
-      .map((u) => `${u.name} Lv${upgradeLevel(save, u.id)}`)
-      .join('　·　');
+  deckSummary(save) {
+    const act = activeCards(save);
+    return CARDS.filter((c) => act.has(c.id)).map((c) => `<span style="color:${CARD_CATS[c.cat].color}">${c.icon}</span> ${c.name}`).join('　');
   }
 
-  titleWorkshop(save) {
-    const buyBtn = (action, id, cost) => (cost == null
-      ? '<button class="btn" disabled>已满级</button>'
-      : `<button class="btn" data-action="${action}" data-id="${id}" ${save.stardust < cost ? 'disabled' : ''}>✦ ${cost}</button>`);
-    const keepsakes = KEEPSAKES.map((k) => {
-      const lv = keepsakeLevel(save, k.id);
-      const cost = nextKeepsakeCost(save, k);
-      const school = k.school ? `<span class="kind" style="color:${SCHOOLS[k.school].color}">${SCHOOLS[k.school].name}</span>` : '';
-      const lines = k.levels.map((t, i) => `<div class="small ${i < lv ? '' : 'dim'}">Lv${i + 1}：${t}</div>`).join('');
-      return `<div class="upgrade"><div class="grow"><b>${k.icon} ${k.name}</b>${school}${lines}</div>
-        <div class="lv">${lv}/${k.costs.length}</div>${buyBtn('buyKeepsake', k.id, cost)}</div>`;
+  // 命盘：5×5 卡牌。点击未解锁的卡 = 花星尘解锁；点击已解锁的卡 = 装备 / 卸下
+  titleDeck(save) {
+    const cap = deckCapacity(save);
+    const used = deckUsed(save);
+    const capCost = nextCapacityCost(save);
+    const grid = [];
+    for (let r = 0; r < DECK_SIZE; r++) for (let c = 0; c < DECK_SIZE; c++) grid.push(CARDS.find((x) => x.pos[0] === r && x.pos[1] === c));
+    const tiles = grid.map((card) => {
+      const cat = CARD_CATS[card.cat];
+      const unlocked = cardUnlocked(save, card.id);
+      const wake = card.cat === 'wake';
+      const on = wake ? cardAwake(save, card) : cardEquipped(save, card.id);
+      const fits = used + card.cost <= cap;
+      let state; let action; let foot;
+      if (!unlocked) {
+        state = 'locked';
+        action = 'unlockCard';
+        foot = `<span class="stardust">✦ ${card.unlock}</span> 解锁`;
+      } else if (wake) {
+        state = on ? 'on awake' : 'dormant';
+        action = '';
+        foot = on ? '已觉醒' : '未觉醒';
+      } else {
+        state = on ? 'on' : fits ? 'off' : 'off nofit';
+        action = 'toggleCard';
+        foot = on ? '已装备' : fits ? '点击装备' : '心力不足';
+      }
+      const pips = wake ? '<span class="pip-wake">0</span>' : '◆'.repeat(card.cost);
+      const disabled = (!unlocked && save.stardust < card.unlock) || (unlocked && wake) ? 'disabled' : '';
+      const extra = [card.needText ? `条件：${card.needText}` : '', card.unlockText || ''].filter(Boolean).map((t) => `<div class="cond">${t}</div>`).join('');
+      return `<button class="deck-card ${state}" style="--cc:${cat.color}" data-action="${action}" data-id="${card.id}" ${disabled}>
+        <div class="dc-top"><span class="dc-cost">${pips}</span><span class="dc-cat">${cat.name}</span></div>
+        <div class="dc-icon">${card.icon}</div>
+        <div class="dc-name">${card.name}</div>
+        <div class="dc-desc">${card.desc}${extra}</div>
+        <div class="dc-foot">${foot}</div>
+      </button>`;
     }).join('');
-    const row = (u) => {
-      const lv = upgradeLevel(save, u.id);
-      return `<div class="upgrade">
-        <div class="grow"><b>${u.name}</b><span class="kind ${u.kind}">${KIND_LABEL[u.kind]}</span>
-          <div class="small dim">${u.desc}</div></div>
-        <div class="lv">${lv}/${u.costs.length}</div>${buyBtn('upgrade', u.id, nextUpgradeCost(save, u))}</div>`;
-    };
-    return `<p class="small dim">局外成长以解锁为主；数值成长只给宽容度（血量、护盾），且有上限。</p>
-      <h3>遗物（开局携带）</h3><div style="display:grid;gap:8px">${keepsakes}</div>
-      <h3>解锁</h3><div style="display:grid;gap:8px">${META_UPGRADES.filter((u) => u.kind === 'unlock').map(row).join('')}</div>
-      <h3>宽容度与开局选择</h3><div style="display:grid;gap:8px">${META_UPGRADES.filter((u) => u.kind !== 'unlock').map(row).join('')}</div>`;
+    const ks = KEEPSAKES.map((k) => {
+      const own = keepsakeLevel(save, k.id) > 0;
+      const school = k.school ? `<span class="kind" style="color:${SCHOOLS[k.school].color}">${SCHOOLS[k.school].name}</span>` : '';
+      return `<div class="upgrade"><div class="grow"><b>${k.icon} ${k.name}</b>${school}<div class="small dim">${k.desc}</div></div>
+        ${own ? '<button class="btn" disabled>已拥有</button>' : `<button class="btn" data-action="buyKeepsake" data-id="${k.id}" ${save.stardust < k.cost ? 'disabled' : ''}>✦ ${k.cost}</button>`}</div>`;
+    }).join('');
+    return `
+      <div class="row deck-head">
+        <div class="grow">
+          <div class="small dim">心力 ${used} / ${cap}（上限 ${DECK_CAPACITY.base + DECK_CAPACITY.step * DECK_CAPACITY.costs.length}）</div>
+          <div class="grasp">${Array.from({ length: cap }, (_, i) => `<span class="${i < used ? 'full' : ''}"></span>`).join('')}</div>
+        </div>
+        ${capCost == null ? '<button class="btn" disabled>心力已满</button>' : `<button class="btn" data-action="buyCapacity" ${save.stardust < capCost ? 'disabled' : ''}>心力 +${DECK_CAPACITY.step}　✦ ${capCost}</button>`}
+      </div>
+      <p class="small dim">星尘解锁卡牌；装备的卡总消耗（◆）不能超过心力上限。<b style="color:${CARD_CATS.wake.color}">觉醒卡</b>不占心力，解锁后只要相邻的指定卡牌都已装备就自动生效。解锁带「核心」的卡牌会让对应的强化进入奖池（不需要装备）。</p>
+      <div class="deck-grid">${tiles}</div>
+      <h3>遗物（开局携带 1 个）</h3><div style="display:grid;gap:8px">${ks}</div>`;
   }
 
   titleProfile(save) {
@@ -193,15 +230,15 @@ export class UI {
         ${this.statCard('爆头率', `${(avg('hsRate') * 100).toFixed(1)}%`, this.spark(series('hsRate')))}
         ${this.statCard('甩枪反应', reactions.length ? `${Math.round(avg('reactionMs'))}ms` : '—', this.spark(reactions.map((v) => -v)))}
         ${this.statCard('移动目标命中率', series('moverAcc').length ? `${(avg('moverAcc') * 100).toFixed(1)}%` : '—', this.spark(series('moverAcc')))}
-        ${this.statCard('平均最高连杀', avg('maxCombo').toFixed(1), this.spark(series('maxCombo')))}
-        ${this.statCard('历史最高连杀', best('maxCombo'))}
+        ${this.statCard('平均评级', series('avgTier').length ? tierBadge(Math.round(avg('avgTier'))) : '—', this.spark(series('avgTier')))}
+        ${this.statCard('历史最高评级', series('peakTier').length ? tierBadge(best('peakTier')) : '—')}
         ${this.statCard('最远到达', `第 ${best('waves')} 波`)}
       </div>
       <p class="small dim">曲线为全部记录（左旧右新）。甩枪反应 = bot 进入视野到你第一次命中它的时间，曲线越高代表越快。移动目标命中率 = 对带机动的 bot 的命中 /（命中 + 打在它附近的空枪）。</p>
       <h3>最近 ${last.length} 局</h3>
-      <table><tr><th>时间</th><th>结果</th><th>波数</th><th>精准</th><th>爆头率</th><th>最高连杀</th><th>反应</th><th>星尘</th></tr>
+      <table><tr><th>时间</th><th>结果</th><th>波数</th><th>精准</th><th>爆头率</th><th>最高评级</th><th>反应</th><th>星尘</th></tr>
       ${last.map((r) => `<tr><td>${new Date(r.date).toLocaleString()}</td><td>${r.victory ? '<span style="color:var(--good)">通关</span>' : '阵亡'}</td>
-        <td>${r.waves}</td><td>${(r.accuracy * 100).toFixed(1)}%</td><td>${(r.hsRate * 100).toFixed(1)}%</td><td>${r.maxCombo}</td>
+        <td>${r.waves}</td><td>${(r.accuracy * 100).toFixed(1)}%</td><td>${(r.hsRate * 100).toFixed(1)}%</td><td>${tierBadge(r.peakTier)}</td>
         <td>${r.reactionMs ? `${Math.round(r.reactionMs)}ms` : '—'}</td><td class="stardust">+${r.stardust}</td></tr>`).join('')}</table>`;
   }
 
@@ -268,7 +305,7 @@ export class UI {
       <h3>声音</h3>
       <label class="row"><span style="width:130px">音量</span><input type="range" min="0" max="1" step="0.05" value="${st.volume}" data-setting="volume" /><b id="vol-val">${Math.round(st.volume * 100)}%</b></label>
       <h3>存档</h3>
-      <button class="btn danger" data-action="resetSave">清空全部存档（星尘、工坊、档案）</button>`;
+      <button class="btn danger" data-action="resetSave">清空全部存档（星尘、命盘、档案）</button>`;
   }
 
   sensInfo(save) {
@@ -342,7 +379,7 @@ export class UI {
 
   reward(run, choices, title) {
     this.show(`
-      <div class="card">
+      <div class="card crt">
         <h2>${title}</h2>
         <p class="dim small">免费三选一。强化只会奖励精准，不会替你瞄准。</p>
         <div class="choices">${choices.map((id) => this.upgradeCard(id, run, { action: 'pick' })).join('')}</div>
@@ -383,7 +420,7 @@ export class UI {
     const goldReroll = isShop ? R.goldRerollPrice(run, shop) : null;
     const temps = run.temp.map((t) => `${WELL_ITEMS[t.id].name}（剩 ${t.waves} 波）`).join('、');
     this.show(`
-      <div class="card">
+      <div class="card crt">
         <div class="row">
           <h2 class="grow" style="margin:0">${isShop ? '⚖ 卡戎商店' : '⛲ 卡戎之井'}</h2>
           <div class="stardust" style="font-size:18px;margin-right:16px">🎲 ${run.rerolls}</div>
@@ -408,7 +445,7 @@ export class UI {
   }
 
   pause() {
-    this.show(`<div class="card" style="max-width:420px;text-align:center">
+    this.show(`<div class="card crt" style="max-width:420px;text-align:center">
       <h2>已暂停</h2><p class="dim small">点击继续会重新锁定鼠标。</p>
       <div class="row" style="justify-content:center;margin-top:14px">
         <button class="btn primary" data-action="resume">继续</button>
@@ -421,11 +458,11 @@ export class UI {
       return `<tr><td>${v.kind === 'well' ? '卡戎之井' : '卡戎商店'}（第 ${v.wave} 波后）</td><td>${v.hpIn}/${v.maxHp}</td><td>${v.goldIn}</td><td>${buys}</td><td>${v.goldOut}</td><td>${(v.timeMs / 1000).toFixed(1)}s</td></tr>`;
     }).join('');
     this.show(`
-      <div class="card">
+      <div class="card crt">
         <h2>${summary.victory ? '<span style="color:var(--good)">通关！</span>' : '<span style="color:var(--danger)">阵亡</span>'}
           <span class="dim small">到达 ${summary.waves}/${WAVES.length} 波</span></h2>
         <div class="stat-grid">
-          ${this.statCard('最高连杀', summary.maxCombo)}
+          ${this.statCard('最高评级', tierBadge(summary.peakTier))}
           ${this.statCard('爆头数', summary.headshots)}
           ${this.statCard('精准度', `${(summary.accuracy * 100).toFixed(1)}%`)}
           ${this.statCard('击杀', summary.kills)}
@@ -435,16 +472,17 @@ export class UI {
         </div>
         <h3>星尘结算</h3>
         <table>
-          <tr><td>${SETTLEMENT.comboSqrt} × √最高连杀 ${summary.maxCombo}</td><td class="stardust">+${settlement.combo}</td></tr>
-          <tr><td>爆头 ${summary.headshots} × ${SETTLEMENT.perHeadshot}</td><td class="stardust">+${settlement.headshots}</td></tr>
+          <tr><td>火力评级：每波结束时的评级（D=0 … S=4）累计 ${run.ratingScore} × ${SETTLEMENT.perTierWave}</td><td class="stardust">+${settlement.rating}</td></tr>
+          <tr><td>击杀 ${summary.kills} × ${SETTLEMENT.perKill}</td><td class="stardust">+${settlement.kills}</td></tr>
           <tr><td>到达深度 ${summary.waves} 波 × ${SETTLEMENT.perWave}</td><td class="stardust">+${settlement.depth}</td></tr>
           ${summary.victory ? `<tr><td>通关奖励</td><td class="stardust">+${settlement.victory}</td></tr>` : ''}
           ${settlement.blank ? `<tr><td>空白徽章 +25%</td><td class="stardust">+${settlement.blank}</td></tr>` : ''}
+          ${settlement.star ? `<tr><td>星之觉醒 +15%</td><td class="stardust">+${settlement.star}</td></tr>` : ''}
           <tr><td>商店兑换</td><td class="stardust">+${settlement.shop}</td></tr>
         </table>
         <h3>本局商店决策</h3>
         ${visits ? `<table><tr><th>商店</th><th>进店生命</th><th>进店金币</th><th>购买</th><th>剩余</th><th>停留</th></tr>${visits}</table>` : '<p class="dim small">本局没有进过商店。</p>'}
-        <p class="small dim">强化：${this.upgradeList(run)}${run.keepsake ? ` · 遗物：${KEEPSAKES.find((k) => k.id === run.keepsake).name} Lv${run.keepsakeLv}` : ''}</p>
+        <p class="small dim">强化：${this.upgradeList(run)}${run.keepsake ? ` · 遗物：${KEEPSAKES.find((k) => k.id === run.keepsake).name}` : ''}</p>
         <div class="row" style="margin-top:16px">
           <button class="btn primary" data-action="start">再来一局</button>
           <button class="btn" data-action="toTitle">返回标题</button>
@@ -461,16 +499,24 @@ export class UI {
     $('gold-val').textContent = run.gold;
     $('wave-label').textContent = waveLabel;
     $('enemies-left').textContent = `剩余敌人 ${enemiesLeft}`;
-    const mult = R.multiplier(run);
-    const multEl = $('mult');
-    multEl.textContent = `${mult.toFixed(1)}x`;
-    const cls = mult >= 4 ? 'max' : mult >= 2.5 ? 'hot' : '';
-    if (cls !== this.lastMultClass && !multEl.classList.contains('break')) {
-      multEl.classList.remove('hot', 'max');
-      if (cls) multEl.classList.add(cls);
-      this.lastMultClass = cls;
+    // 火力评级：字母 + 进度条 + 金币倍率；升降级时闪一下
+    const rt = run.rating;
+    const t = TIER(rt.tier);
+    const box = $('rating-box');
+    if (rt.tier !== this.lastTier) {
+      const up = this.lastTier != null && rt.tier > this.lastTier;
+      const down = this.lastTier != null && rt.tier < this.lastTier;
+      $('rating').textContent = t.id;
+      box.style.setProperty('--tc', t.color);
+      box.classList.remove('up', 'down');
+      void box.offsetWidth;
+      if (up) box.classList.add('up');
+      if (down) box.classList.add('down');
+      this.lastTier = rt.tier;
     }
-    $('combo').textContent = `连杀 ${run.combo}`;
+    $('rating-fill').style.width = `${Math.min(1, rt.points / t.need) * 100}%`;
+    $('rating-gold').textContent = `金币 ×${R.goldMultiplier(run)}`;
+    box.classList.toggle('decay', rt.idle > RATING.decayDelay && rt.points > 0 && !R.has(run, 'steady'));
     const fw = $('focus-wrap');
     const active = run.focusTime > 0;
     const ready = R.canActivateFocus(run);
@@ -511,15 +557,6 @@ export class UI {
       const lvTag = u.cat === 'base' ? `<sub>${run.ups[id]}</sub>` : '';
       return `<div class="relic-chip cat-${u.cat}" style="${color ? `border-color:${color}` : ''}" title="${u.name}：${u.desc}">${u.icon}${lvTag}</div>`;
     }).join('');
-  }
-
-  comboBreak() {
-    const el = $('mult');
-    el.classList.remove('break', 'hot', 'max');
-    this.lastMultClass = '';
-    void el.offsetWidth;
-    el.classList.add('break');
-    setTimeout(() => el.classList.remove('break'), 320);
   }
 
   hitmarker(head) {

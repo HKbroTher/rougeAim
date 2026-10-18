@@ -12,6 +12,13 @@ export const SKILLS = {
   expert:  { reaction: 0.19, gain: 12, maxTurn: 14, noise: 0.004, lead: 0.75, headAim: 0.9, trigger: 0.9 },
 };
 
+// 打法：precision = 点射型（几乎只瞄头、对准了才开枪）；spray = 扫射型（瞄胸口、准星压到身上就按住不放）
+export const STYLES = {
+  default: {},
+  precision: { headAim: 0.95, triggerMul: 0.85 },
+  spray: { headAim: 0.12, triggerMul: 1.5, hold: true },
+};
+
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const gauss = () => {
   let u = 0;
@@ -22,9 +29,12 @@ const gauss = () => {
 };
 
 export class SimAimer {
-  constructor(game, skill) {
+  constructor(game, skill, style = 'default') {
     this.game = game;
-    this.k = skill;
+    const st = STYLES[style] || {};
+    this.k = { ...skill, headAim: st.headAim ?? skill.headAim, trigger: skill.trigger * (st.triggerMul ?? 1) };
+    this.hold = !!st.hold;
+    this.wasFiring = false;
     this.t = 0;
     this.hist = new Map(); // bot.id -> [{t, head, chest}]
     this.target = null;
@@ -117,7 +127,9 @@ export class SimAimer {
 
     // 觉得准星落在目标上才开枪
     const radius = this.aimHead ? bot.def.head : Math.min(bot.def.body[0], bot.def.body[1]) * 0.45;
-    if (err < (radius / Math.max(1, d.length())) * this.k.trigger && this.acquire <= 0) g.firing = true;
+    const tol = (radius / Math.max(1, d.length())) * this.k.trigger * (this.hold && this.wasFiring ? 1.6 : 1);
+    if (err < tol && this.acquire <= 0) g.firing = true;
+    this.wasFiring = g.firing;
 
     // 战术换弹和子弹时间
     const near = g.bots.filter((b) => !b.dead && b.distance < 10).length;
