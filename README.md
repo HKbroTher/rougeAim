@@ -96,7 +96,7 @@ src/config.js   所有可调数值（玩家、武器、火力评级、专注、b
 src/run.js      单局规则：火力评级、专注、伤害、金币、商店定价与购买（不依赖渲染）
 src/upgrades.js 强化定义（效果在 run.js / game.js）
 src/meta.js     局外存档（localStorage）、命盘、旧存档迁移、商店日志统计
-src/game.js     状态机、输入、射击、波次、强化效果（伤害计算、穿透、灼烧、子弹时间结束处理）
+src/game.js     状态机、输入、射击、波次、强化效果（伤害计算、灼烧、子弹时间）
 src/bots.js     bot 模型与移动
 src/world.js    场景、相机、特效
 src/ui.js       HUD 与所有界面

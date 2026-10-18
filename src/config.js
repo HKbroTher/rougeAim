@@ -319,8 +319,8 @@ const pct = (v) => `${v}%`;
 export const CARDS = [
   // 第 1 行
   { id: 'h_aim', pos: [0, 0], cat: 'head', icon: '⌖', name: '准星校准', cost: 1, unlock: 0, vals: [0.5, 0.75, 1, 1.5], desc: '爆头伤害 +{v}。' },
-  { id: 'h_pierce', pos: [0, 1], cat: 'head', icon: '⇶', name: '处刑人', cost: 2, unlock: 70, unlocks: ['pierce'], vals: [10, 15, 20, 30], fmt: pct,
-    desc: '爆头伤害 +{v}；三选一中爆头流强化的出现权重 +60%。', unlockText: '解锁即让核心「穿颅弹」进入奖池' },
+  { id: 'h_pierce', pos: [0, 1], cat: 'head', icon: '⇶', name: '处刑人', cost: 2, unlock: 70, unlocks: ['momentum'], vals: [10, 15, 20, 30], fmt: pct,
+    desc: '爆头伤害 +{v}；三选一中爆头流强化的出现权重 +60%。', unlockText: '解锁即让核心「处决势头」进入奖池' },
   { id: 'w_full', pos: [0, 2], cat: 'wake', icon: '◉', name: '同心', cost: 0, unlock: 90, wake: 'row', vals: [5, 8, 11, 15], fmt: pct,
     desc: '所有伤害 +{v}。', needText: '所在的第 1 行其余 4 张卡全部装备' },
   { id: 's_heat', pos: [0, 3], cat: 'spray', icon: '♨', name: '熔炉', cost: 2, unlock: 70, unlocks: ['overheat'], vals: [8, 12, 16, 22], fmt: pct,
@@ -329,7 +329,8 @@ export const CARDS = [
   // 第 2 行
   { id: 'h_badge', pos: [1, 0], cat: 'head', icon: '🎯', name: '狙击手', cost: 4, unlock: 110, vals: [20, 30, 40, 55], fmt: pct, desc: '对 12 米外的目标，爆头伤害 +{v}。' },
   { id: 'v_body', pos: [1, 1], cat: 'tol', icon: '♥', name: '强健体魄', cost: 1, unlock: 0, vals: [15, 25, 35, 50], desc: '生命上限 +{v}。' },
-  { id: 'v_shield', pos: [1, 2], cat: 'tol', icon: '◈', name: '磨砺', cost: 2, unlock: 40, vals: [8, 12, 16, 22], desc: '每打完一个区域（第 5、10、15 波），生命上限 +{v}，并回复同样多的生命。' },
+  { id: 'v_shield', pos: [1, 2], cat: 'tol', icon: '◈', name: '喘息', cost: 2, unlock: 40, vals: [0.5, 0.8, 1.1, 1.5], fmt: (v) => `${v} 秒`,
+    desc: '每次受到伤害后，{v}内不会再受伤（被围住时不会一下子被连撞好几次）。' },
   { id: 'v_aid', pos: [1, 3], cat: 'tol', icon: '✚', name: '老兵', cost: 2, unlock: 50, vals: [10, 15, 20, 26], fmt: pct, desc: '从第 6 波开始，受到的伤害 −{v}。' },
   { id: 's_badge', pos: [1, 4], cat: 'spray', icon: '🥁', name: '火力延续', cost: 4, unlock: 110, vals: [10, 15, 20, 28], fmt: pct, desc: '持续开火超过 1 秒后，伤害 +{v}。' },
   // 第 3 行

@@ -16,6 +16,8 @@ export function createRun(save) {
     cardLv: levels,
     shield: 0,
     revivesLeft: cv('v_death'), // 死亡抗拒：可以复活的次数
+    iframe: 0,          // 喘息：受伤后的无敌时间（秒，真实时间）
+    momentumUntil: -9,  // 处决势头：这个时刻之前的下一发爆头 ×2
     gold: cv('e_stake'),
     // 火力评级：tier 0..4（D..S），points 当前等级的进度，idle 多久没造成伤害
     rating: { tier: 0, points: 0, idle: 0, peak: 0 },
@@ -269,7 +271,7 @@ export function endBulletTime(run) {
 
 // ---------------- 命中 / 打空 / 伤害 ----------------
 
-// 一次命中的统计。extra：穿透等额外命中，不计入命中统计（否则命中率会超过 100%）
+// 一次命中的统计。extra：额外命中，不计入命中统计（否则命中率会超过 100%）
 export function registerHit(run, headshot, { extra = false } = {}) {
   if (extra) return;
   run.stats.hits++;
@@ -287,7 +289,7 @@ export function registerMiss(run) {
   addRating(run, -Math.min(run.rating.points, RATING.missPenalty));
 }
 
-// 对敌人实际造成的伤害（溢出不算），所有来源（子弹、穿透、震爆、灼烧）都走这里。
+// 对敌人实际造成的伤害（溢出不算），所有来源（子弹、震爆、灼烧）都走这里。
 // 评级与专注都按伤害增长，所以爆头和身体按各自的伤害算，不再额外偏向爆头。
 export function onDamage(run, applied, killed) {
   run.stats.damage += applied;
@@ -337,6 +339,8 @@ export function killGold(run, base, extraMul = 1) {
 
 // 返回 { absorbed, dead, revived }
 export function takeDamage(run, dmg) {
+  // 喘息：受伤后的无敌时间内不再受伤
+  if (run.iframe > 0) return { absorbed: true, dead: false, iframe: true };
   if (run.shield > 0) {
     run.shield--;
     return { absorbed: true, dead: false };
@@ -348,6 +352,7 @@ export function takeDamage(run, dmg) {
   if (run.waveIndex >= 5) dmg *= 1 - cv(run, 'v_aid') / 100;
   dmg = Math.round(dmg);
   run.hp = Math.max(0, run.hp - dmg);
+  run.iframe = cv(run, 'v_shield');
   run.stats.damageTaken += dmg;
   // 被碰到降一级评级
   dropTier(run);
@@ -412,9 +417,6 @@ export function finishWave(run) {
   run.temp = run.temp.map((t) => ({ ...t, waves: t.waves - 1 })).filter((t) => t.waves > 0);
   if (SHOP.shopAfter.includes(run.waveIndex)) {
     run.rerolls += SHOP.rerollTokensPerRegion;
-    // 磨砺：每打完一个区域，生命上限 +x 并回复
-    const grow = cv(run, 'v_shield');
-    if (grow) { run.maxHp += grow; run.hp += grow; }
     if (hasCard(run, 'w_few')) giftCards(run, cv(run, 'w_few'));
   }
 }

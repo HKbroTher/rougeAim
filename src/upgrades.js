@@ -12,7 +12,7 @@ export const SCHOOLS = {
 export const CAT_LABEL = { base: '基础', school: '流派', core: '核心', general: '通用', econ: '经济' };
 
 // 三个流派的定位（伤害模型：身体 2、爆头 ×1.5；普通兵 6 血、冲锋兵 3 血、重甲兵 30 血）：
-//   爆头流 = 单发伤害：抬高爆头倍率，奖励一枪击杀，穿透
+//   爆头流 = 单发伤害：抬高爆头倍率，奖励一枪击杀，连续爆头击杀
 //   扫射流 = 持续伤害：射速、弹匣、按「持续开火时间」叠加的增益、破甲；打空不会打断任何增益
 //   子弹时间流 = 爆发窗口：在子弹时间里集中输出
 export const UPGRADES = {
@@ -36,11 +36,11 @@ export const UPGRADES = {
   onetap: { cat: 'school', school: 'head', set: '处决', icon: '⤴', name: '一击回收', desc: '爆头击杀返还 1 发子弹；一枪打死满血目标返还 3 发。' },
   bounty: { cat: 'school', school: 'head', set: '处决', icon: '💰', name: '斩首赏金', desc: '爆头击杀基础金币 +1；一枪打死满血目标再 +2。' },
   // ② 连锁：一发子弹打多个目标
-  pierce: { cat: 'core', school: 'head', set: '连锁', icon: '⇶', name: '穿颅弹', locked: true,
-    desc: '爆头后子弹继续飞，最多再穿 2 个目标（伤害 ×0.75）；穿透再爆头可以继续穿。' },
+  momentum: { cat: 'core', school: 'head', set: '连锁', icon: '⇶', name: '处决势头', locked: true,
+    desc: '爆头击杀后 1.5 秒内，下一发爆头伤害 ×2；用它再爆头击杀可以一直连下去。' },
   headblast: { cat: 'school', school: 'head', set: '连锁', icon: '✸', name: '爆头震爆', desc: '爆头时 3 米内其他敌人受 2 点伤害。' },
   execchain: { cat: 'school', school: 'head', set: '连锁', icon: '⛓', name: '处刑链', desc: '1 秒内连续爆头不同目标，每次 +1 伤害（最多 +3）；同一目标或超时重置。' },
-  aftershock: { cat: 'school', school: 'head', set: '连锁', icon: '≋', name: '余震', desc: '震爆、穿透、灼烧造成的伤害 +50%。' },
+  aftershock: { cat: 'school', school: 'head', set: '连锁', icon: '≋', name: '余震', desc: '震爆、灼烧造成的伤害 +50%。' },
   // ③ 甩枪：转身瞬间的那一枪
   flickmaster: { cat: 'core', school: 'head', set: '甩枪', icon: '↯', name: '甩枪大师', locked: true,
     desc: '开枪前 0.4 秒内转身 ≥ 60° 时（准星变金），这一枪若爆头：伤害 ×2，并返还 2 发子弹。' },
@@ -78,7 +78,7 @@ export const UPGRADES = {
     desc: '子弹时间变为 1.2 秒，敌人完全静止。其他强化的时长加成只按一半生效。' },
   freezeframe: { cat: 'school', school: 'time', set: '时停', icon: '▣', name: '定格', desc: '子弹时间中所有伤害 +40%。' },
   timebank: { cat: 'school', school: 'time', set: '时停', icon: '⏳', name: '时间余量', desc: '子弹时间中每造成 10 点伤害，时长 +0.15 秒（每次最多 +1.5 秒）。' },
-  phaseround: { cat: 'school', school: 'time', set: '时停', icon: '⇉', name: '相位弹', desc: '子弹时间中，子弹会穿透 1 个目标（伤害 ×0.6）。' },
+  nowaste: { cat: 'school', school: 'time', set: '时停', icon: '⇉', name: '零损耗', desc: '子弹时间中，打空的子弹不消耗弹药。' },
   chill: { cat: 'school', school: 'time', set: '时停', icon: '❄', name: '冻结弹', desc: '子弹时间中被命中的敌人，本次子弹时间内移动速度再 −50%。' },
   // ② 续杯
   afterglow: { cat: 'core', school: 'time', set: '续杯', icon: '☀', name: '余韵', desc: '子弹时间中每次击杀，时长 +0.25 秒（每次最多 +2 秒）。' },

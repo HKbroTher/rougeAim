@@ -229,18 +229,16 @@ const results = await page.evaluate(async () => {
   ['v_body', 'v_death', 'e_stake', 'v_shield', 'e_fate'].forEach((id) => meta.toggleCard(g.save, id));
   run = fresh({});
   check('卡牌按等级生效：生命 +50（4 级）、没有开局护盾、金币 20、骰子 +2', run.maxHp === 150 && run.shield === 0 && run.gold === 20 && run.rerolls === 4, `${run.maxHp} ${run.shield} ${run.gold} ${run.rerolls}`);
-  run.waveIndex = 4;
-  R.finishWave(run);
-  check('磨砺：打完区域生命上限 +8', run.maxHp === 158);
   run.hp = 5;
   const res = R.takeDamage(run, 50);
   check('死亡抗拒 1 级：复活 1 次，回到 50%', res.revived && run.hp === Math.round(run.maxHp * 0.5), run.hp);
   run.hp = 5;
+  run.iframe = 0; // 装着喘息，跳过无敌时间
   check('死亡抗拒 1 级：第二次照常死亡', R.takeDamage(run, 50).dead);
   g.save.deck.levels.v_death = 3;
   run = fresh({});
   let revs = 0;
-  for (let k = 0; k < 4; k++) { run.hp = 5; if (R.takeDamage(run, 50).revived) revs++; }
+  for (let k = 0; k < 4; k++) { run.hp = 5; run.iframe = 0; if (R.takeDamage(run, 50).revived) revs++; }
   check('死亡抗拒 3 级：复活 3 次', revs === 3 && run.hp === 0, revs);
   g.save.deck.levels.v_death = 1;
   // 独行：区域结束随机激活卡（装备 4 张，独行觉醒）
@@ -257,7 +255,7 @@ const results = await page.evaluate(async () => {
   run = fresh({});
   check('凯旋：击杀金币 +15%', R.killGold(run, 20) === 23);
   g.save.deck.unlocked.push('h_flick');
-  check('解锁卡牌即把核心加入奖池', meta.unlockedUpgrades(g.save).includes('pierce') && meta.unlockedUpgrades(g.save).includes('flickmaster'));
+  check('解锁卡牌即把核心加入奖池', meta.unlockedUpgrades(g.save).includes('momentum') && meta.unlockedUpgrades(g.save).includes('flickmaster'));
   Object.assign(g.save, save0);
   // 旧存档迁移：工坊花费和遗物升级退还星尘
   localStorage.setItem('rougeaim.save.v1', JSON.stringify({ stardust: 10, upgrades: { vitality: 2, unlock_pierce: 1 }, keepsakes: { hunter: 3, drum: 1, watch: 1, prism: 1 }, settings: { volume: 0.3 } }));
@@ -410,7 +408,7 @@ const results = await page.evaluate(async () => {
     check('蜂巢：三个舱都拆掉 → 核心暴露', hive.phaseIdx === 1 && hive.eye.userData.part === 'head');
     hive.remove();
     run = fresh({});
-    run.unlocked = ['pierce', 'flickmaster', 'overheat', 'suppress', 'stasis', 'blink'];
+    run.unlocked = ['momentum', 'flickmaster', 'overheat', 'suppress', 'stasis', 'blink'];
     const loot = R.rollRewardChoices(run, 3, { core: true });
     check('Boss 战利品：三个都是核心强化', loot.length === 3 && loot.every((id) => UPGRADES[id].cat === 'core'), loot);
 
@@ -471,28 +469,45 @@ const results = await page.evaluate(async () => {
     g.save.stardust = sd; g.save.cores = cs;
   }
 
-  // ---- 场景：穿颅弹 ----
-  run = fresh({ pierce: 1, guillotine: 1 });
+  // ---- 场景：处决势头 / 零损耗 / 喘息 ----
+  const scene = (ups, extra = {}) => {
+    const r2 = fresh(ups, extra);
+    g.clearBots(); g.spawnQueue = []; g.waveDef = { name: 't', speedMul: 1, damageMul: 1 }; g.state = 'combat';
+    return r2;
+  };
+  const shootHead = (b) => {
+    const h = b.headWorld.sub(g.camera.position);
+    g.yaw = Math.atan2(-h.x, -h.z); g.pitch = Math.atan2(h.y, Math.hypot(h.x, h.z));
+    g.camera.rotation.set(g.pitch, g.yaw, 0); g.camera.updateMatrixWorld();
+    g.shoot();
+  };
+  run = scene({ momentum: 1, guillotine: 1 });
+  const m1 = new Bot('normal', g.world.scene, Math.PI, 6, 0); m1.place();
+  const m2 = new Bot('heavy', g.world.scene, Math.PI + 0.6, 8, 0); m2.place();
+  g.bots.push(m1, m2);
+  shootHead(m1);
+  check('处决势头：爆头击杀后开启 1.5 秒窗口', m1.dead && run.momentumUntil > g.time);
+  shootHead(m2);
+  check('处决势头：下一发爆头 ×2（重甲兵 30 → 18）', m2.hp === 18, m2.hp);
+  check('处决势头：用掉后窗口关闭', run.momentumUntil < g.time);
   g.clearBots();
-  g.spawnQueue = [];
-  g.waveDef = { name: 't', speedMul: 1 };
-  g.state = 'combat';
-  const line = [5, 8, 11].map((d) => {
-    const b = new Bot('normal', g.world.scene, Math.PI, d, 0);
-    b.place();
-    g.bots.push(b);
-    return b;
-  });
-  const headY = line[0].headWorld.y;
-  g.yaw = 0;
-  g.pitch = Math.atan2(headY - 1.6, 5);
-  g.camera.rotation.set(g.pitch, g.yaw, 0);
-  g.camera.updateMatrixWorld();
+  run = scene({ nowaste: 1 }, { focus: 20 });
+  R.activateFocus(run);
+  g.bots.push(new Bot('normal', g.world.scene, 0, 200, 0));
+  const ammo0 = run.ammo;
+  g.yaw = 0; g.pitch = 0; g.camera.rotation.set(0, 0, 0); g.camera.updateMatrixWorld();
   g.shoot();
-  const hps = line.map((b) => (b.dead ? 0 : b.hp));
-  check('穿颅弹：爆头打死第一个，后面两个各受 ×0.75 爆头伤害', hps.join() === '0,1.5,1.5', hps);
-  check('穿透命中不计入命中统计', run.stats.hits === 1 && run.stats.shots === 1);
+  check('零损耗：子弹时间中打空不消耗弹药', run.ammo === ammo0 && run.stats.misses === 1);
   g.clearBots();
+  g.save.deck = { unlocked: ['v_shield'], active: ['v_shield'], levels: {}, capacityLv: 0 };
+  run = scene({});
+  R.takeDamage(run, 10);
+  const hpA = run.hp;
+  check('喘息：受伤后 0.5 秒内不再受伤', R.takeDamage(run, 10).iframe && run.hp === hpA);
+  run.iframe = 0;
+  R.takeDamage(run, 10);
+  check('喘息：时间过了照常受伤', run.hp === hpA - 10);
+  g.save.deck = save0.deck;
   g.state = 'title';
   return out;
 });

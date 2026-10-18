@@ -561,6 +561,7 @@ export class Game {
     while (this.yawHist.length && this.yawHist[0].t < this.time - 0.4) this.yawHist.shift();
     this.flickReady = R.has(run, 'flickmaster') && this.yawHist.some((h) => Math.abs(h.yaw - this.yaw) >= Math.PI / 3);
     R.tickRating(run, dt);
+    run.iframe = Math.max(0, run.iframe - dt);
 
     // 视野检测：用于「甩枪反应」统计
     this.camera.updateMatrixWorld();
@@ -634,6 +635,8 @@ export class Game {
       const near = this.nearestToCrosshair(0.09);
       if (near && near.mobile) run.stats.moverMisses++;
       R.registerMiss(run);
+      // 零损耗：子弹时间中打空不消耗弹药
+      if (R.inBulletTime(run) && R.has(run, 'nowaste')) run.ammo++;
       sfx.miss();
       return;
     }
@@ -662,7 +665,10 @@ export class Game {
     bot.lastHitAt = this.time; // 压制火力：1 秒没被命中就恢复
     bot.hitsTaken = (bot.hitsTaken || 0) + 1;
 
-    const dmg = this.shotDamage(bot, head, { flick, calm, execBonus });
+    // 处决势头：爆头击杀后 1.5 秒内的下一发爆头 ×2（打出去就用掉）
+    const momentum = head && R.has(run, 'momentum') && this.time < run.momentumUntil;
+    if (momentum) run.momentumUntil = -9;
+    const dmg = this.shotDamage(bot, head, { flick, calm, execBonus }) * (momentum ? 2 : 1);
     R.registerHit(run, head);
     this.ui.hitmarker(head);
     if (head) sfx.headshot(); else sfx.hit();
@@ -683,8 +689,6 @@ export class Game {
       if (msg) { sfx.focus(); this.floatCenter(msg, 'head'); run.stats.weakEffects = (run.stats.weakEffects || 0) + 1; }
     }
     if (head && R.has(run, 'headblast')) this.headBlast(bot.position.clone(), bot);
-    if (head && R.has(run, 'pierce')) this.pierce(hit.point, this.raycaster.ray.direction.clone(), bot, dmg);
-    else if (R.inBulletTime(run) && R.has(run, 'phaseround')) this.pierce(hit.point, this.raycaster.ray.direction.clone(), bot, dmg, { phase: true });
   }
 
   // 对 bot 造成伤害：评级、专注都按实际扣掉的血量算；打死则结算击杀
@@ -733,30 +737,6 @@ export class Game {
     return d;
   }
 
-  // 穿颅弹：从命中点沿弹道继续，最多再穿 2 个目标；打到身体就停下
-  // phase：相位弹（子弹时间中穿透 1 个目标，×0.6，不要求爆头）
-  pierce(from, dir, firstBot, shotDmg, { phase = false } = {}) {
-    const run = this.run;
-    const exclude = new Set([firstBot]);
-    let origin = from.clone().addScaledVector(dir, 0.05);
-    const rc = new THREE.Raycaster(origin, dir, 0, WEAPON.range);
-    for (let n = 0; n < (phase ? 1 : 2); n++) {
-      rc.set(origin, dir);
-      const meshes = this.bots.filter((b) => !b.dead && !exclude.has(b)).flatMap((b) => b.hitMeshes);
-      const h = rc.intersectObjects(meshes, false)[0];
-      if (!h) break;
-      const { bot, part } = h.object.userData;
-      const head = part === 'head';
-      this.world.fx.tracer(origin, h.point, 0xffd166);
-      const dmg = phase ? shotDmg * 0.6 : head ? shotDmg * 0.75 : WEAPON.damage * (R.has(run, 'guillotine') ? 0.5 : 1);
-      R.registerHit(run, head, { extra: true });
-      this.hurtBot(bot, dmg, { head, indirect: true });
-      exclude.add(bot);
-      origin = h.point.clone().addScaledVector(dir, 0.05);
-      if (!head) break;
-    }
-  }
-
   tickBurn(bot, wdt) {
     const burn = bot.burn;
     burn.acc += wdt;
@@ -769,7 +749,7 @@ export class Game {
     if (burn.left <= 0) bot.burn = null;
   }
 
-  // ctx：head 爆头击杀 / onetap 满血一枪打死 / indirect 爆炸穿透灼烧等间接击杀 / fullHeat 满热击杀
+  // ctx：head 爆头击杀 / onetap 满血一枪打死 / indirect 爆炸灼烧等间接击杀 / fullHeat 满热击杀
   killBot(bot, ctx = {}) {
     if (bot.dead) return;
     const run = this.run;
@@ -778,6 +758,7 @@ export class Game {
     let base = bot.def.gold;
     if (R.has(run, 'bounty')) base += (ctx.head && !ctx.indirect ? 1 : 0) + (ctx.onetap ? 2 : 0);
     if (ctx.onetap) base *= 1 + R.cv(run, 'h_flick') / 100;
+    if (ctx.head && !ctx.indirect && R.has(run, 'momentum')) run.momentumUntil = this.time + 1.5;
     const glance = ctx.head && R.has(run, 'glance') && bot.offscreenAt != null && this.time - bot.offscreenAt <= 1;
     const harvest = R.inBulletTime(run) && R.has(run, 'harvest') ? 1.5 : 1;
     const gold = R.killGold(run, base, (glance ? 2 : 1) * harvest * (bot.type === 'heavy' && R.has(run, 'bountyhunter') ? 2 : 1));
@@ -865,7 +846,8 @@ export class Game {
     // 平衡分析用：记录被哪种 bot / 机动碰到
     const key = bot.isOrb ? `orb:${bot.kind}` : `${bot.type}:${bot.move.mode}`;
     (run.stats.hurtBy ||= {})[key] = (run.stats.hurtBy[key] || 0) + 1;
-    if (res.absorbed) { sfx.shield(); this.floatCenter('护盾抵挡', 'info'); }
+    if (res.iframe) this.floatCenter('喘息', 'info');
+    else if (res.absorbed) { sfx.shield(); this.floatCenter('护盾抵挡', 'info'); }
     else { sfx.hurt(); this.ui.hurt(rel); }
     if (res.revived) { sfx.focus(); this.ui.banner('不屈'); }
     if (R.has(run, 'recoilarmor')) {
