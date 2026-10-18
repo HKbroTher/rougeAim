@@ -141,8 +141,18 @@ export class Orb {
 }
 
 // ---------------- Boss 基类 ----------------
+// 所有 Boss 都在你周围高速乱飞（随机航点，频繁变向）。攻击 = 施法：前摇结束后，小球直接在空中的随机位置生成
+// （先出现 0.5 秒的预警光圈），而不是从 Boss 身上射出——盯着 Boss 按住左键挡不住它们。
+
+const markerGeo = new Map();
+function ringGeo(r) {
+  const key = r.toFixed(2);
+  if (!markerGeo.has(key)) markerGeo.set(key, new THREE.TorusGeometry(r, 0.06, 6, 24));
+  return markerGeo.get(key);
+}
 
 class Boss {
+  // fly：{ speed 飞行速度 m/s, hop [最短, 最长] 换航点间隔, r [近, 远], y [低, 高] }
   constructor(id, scene, theta, spawn, geom) {
     const b = BOSSES[id];
     this.id = nextId++;
@@ -153,21 +163,22 @@ class Boss {
     this.hp = b.hp;
     this.maxHp = b.hp;
     this.scene = scene;
-    this.spawn = spawn;  // (kind, { r, theta, y, dir }) => 发射一个小球
+    this.spawn = spawn;  // (kind, { r, theta, y, dir }) => 生成一个小球
     this.move = { mode: 'boss' };
-    this.r = geom.r;
-    this.theta = theta;
-    this.s = 0;
-    this.y = 0;
-    this.bodyH = geom.body[1];
+    this.fly = geom.fly;
+    this.bodyH = 0.3;    // 原点在机身中心：模拟瞄准的「胸口」= 原点 + 0.6 × bodyH
+    this.p = new THREE.Vector3(Math.sin(theta) * geom.fly.r[1], (geom.fly.y[0] + geom.fly.y[1]) / 2, Math.cos(theta) * geom.fly.r[1]);
+    this.vel = new THREE.Vector3();
+    this.goal = this.p.clone();
+    this.hop = 0;
     this.age = 0;
     this.slowTime = 0;
     this.stun = 0;       // 踉跄 / 破绽：不移动、不攻击
     this.vuln = 0;       // 破绽：受到伤害 ×1.5
-    this.charge = 0;     // 攻击前摇剩余时间
-    this.timer = 2;      // 下一次攻击
+    this.charge = 0;     // 施法前摇剩余时间
+    this.timer = 2;      // 下一次施法
     this.volley = 0;
-    this.queue = [];     // 延迟发射的小球
+    this.queue = [];     // 已经出现预警光圈、等待生成的小球
     this.phaseIdx = 0;
     this.phaseChanged = false;
     this.flash = 0;
@@ -201,10 +212,12 @@ class Boss {
     mesh.material.emissiveIntensity = open ? 1.2 + 0.4 * Math.sin(this.age * 14) : 0.2;
   }
 
-  get mobile() { return false; }
+  get mobile() { return true; }
   get hitMeshes() { return this.meshes; }
   get position() { return this.group.position; }
-  get distance() { return Math.hypot(this.group.position.x, this.group.position.z); }
+  get distance() { return Math.hypot(this.p.x, this.p.z); }
+  get r() { return this.distance; }
+  get theta() { return Math.atan2(this.p.x, this.p.z); }
   get frac() { return this.hp / this.maxHp; }
 
   // 模拟瞄准用的「头」= 当前开放的弱点（没有开放的就瞄第一个弱点）
@@ -217,7 +230,7 @@ class Boss {
   get status() {
     if (this.vuln > 0) return '破绽！';
     if (this.stun > 0) return '踉跄';
-    if (this.charge > 0) return '蓄力中';
+    if (this.charge > 0) return '施法中';
     return '';
   }
 
@@ -235,22 +248,54 @@ class Boss {
 
   knockback() {}
 
-  // 从 Boss 前方发射小球。dTheta：方位角偏移（扇形），dy：高度偏移
-  fire(kind, { dTheta = 0, y = this.bodyH * 0.75, dir } = {}) {
-    // 横移中的 Boss（终局）：把切向偏移折算成方位角，小球从它身上发出来
-    this.spawn(kind, { r: Math.hypot(this.r, this.s) - 1.5, theta: this.theta + Math.atan2(this.s, this.r) + dTheta, y: this.y + y, dir });
+  speedMul() { return 1; }
+
+  // 乱飞：到点或到达就换一个随机航点（大多在附近，偶尔一次大跳），有限加速度，所以能看出它在变向
+  flit(dt) {
+    const F = this.fly;
+    this.hop -= dt;
+    if (this.hop <= 0 || this.p.distanceTo(this.goal) < 1) {
+      const big = Math.random() < 0.25;
+      const th = this.theta + (Math.random() - 0.5) * (big ? 3.2 : 1.6);
+      const r = rand(F.r[0], F.r[1]);
+      this.goal.set(Math.sin(th) * r, rand(F.y[0], F.y[1]), Math.cos(th) * r);
+      this.hop = rand(F.hop[0], F.hop[1]);
+    }
+    const want = this.goal.clone().sub(this.p);
+    const d = want.length();
+    const speed = F.speed * this.speedMul();
+    if (d > 0.01) want.multiplyScalar(Math.min(speed, d * 4) / d);
+    const dv = want.sub(this.vel);
+    const maxDv = speed * 4 * dt;
+    if (dv.length() > maxDv) dv.setLength(maxDv);
+    this.vel.add(dv);
+    this.p.addScaledVector(this.vel, dt);
+    const r = Math.hypot(this.p.x, this.p.z);
+    if (r < F.r[0]) { this.p.x *= F.r[0] / r; this.p.z *= F.r[0] / r; } // 不贴脸
+    this.p.y = clamp(this.p.y, F.y[0], F.y[1]);
   }
 
-  fireLater(delay, kind, opts) {
-    this.queue.push({ t: delay, kind, opts });
+  // 施法：在空中随机位置生成 n 个小球。先出现预警光圈，0.5 秒（依次错开）后变成小球。
+  // around：小球出现在哪个方向附近（默认 Boss 所在方向），spread：左右散开多少弧度（π = 整圈）
+  cast(kind, n = 1, { around = this.theta, spread = 1.0, r = [11, 18], y = [1.2, 6], stagger = 0.12, dir } = {}) {
+    const o = ORBS[kind];
+    for (let i = 0; i < n; i++) {
+      const at = { r: rand(r[0], r[1]), theta: around + (Math.random() * 2 - 1) * spread, y: rand(y[0], y[1]), dir };
+      const mm = new THREE.MeshBasicMaterial({ color: o.color, transparent: true, opacity: 0.9 });
+      const ring = new THREE.Mesh(ringGeo(o.radius * 1.7), mm);
+      const [x, z] = polarToXZ(at.r, at.theta, 0);
+      ring.position.set(x, at.y, z);
+      ring.lookAt(0, 1.6, 0);
+      this.scene.add(ring);
+      this.queue.push({ t: 0.5 + i * stagger, kind, at, ring });
+    }
   }
 
   phaseOf() { return 0; }
 
   place() {
-    const [x, z] = polarToXZ(this.r, this.theta, this.s);
-    this.group.position.set(x, this.y, z);
-    this.group.lookAt(0, this.y, 0);
+    this.group.position.copy(this.p);
+    this.group.lookAt(0, this.p.y, 0);
     this.group.updateMatrixWorld(true);
   }
 
@@ -263,9 +308,16 @@ class Boss {
     this.vuln = Math.max(0, this.vuln - dt);
     const ph = this.phaseOf();
     if (ph !== this.phaseIdx) { this.phaseIdx = ph; this.phaseChanged = true; }
-    for (const q of this.queue) q.t -= sdt;
-    for (const q of this.queue.filter((x) => x.t <= 0)) this.fire(q.kind, q.opts);
+    // 预警光圈到时间 → 生成小球
+    for (const q of this.queue) {
+      q.t -= sdt;
+      q.ring.scale.setScalar(0.6 + 0.4 * Math.abs(Math.sin(this.age * 12)));
+      if (q.t <= 0) { this.dropRing(q); this.spawn(q.kind, q.at); }
+    }
     this.queue = this.queue.filter((q) => q.t > 0);
+    if (this.stun > 0) this.vel.multiplyScalar(Math.max(0, 1 - 8 * dt));
+    else this.flit(sdt);
+    if (this.stun > 0) this.p.addScaledVector(this.vel, sdt);
     this.behave(sdt);
     this.place();
     const f = this.flash > 0 ? (this.flash -= dt) * 6 : 0;
@@ -275,7 +327,12 @@ class Boss {
     return false;
   }
 
-  // 标准的「冷却 → 前摇 → 发射」节奏；子类实现 pattern() 和前摇开始 / 结束的效果
+  dropRing(q) {
+    this.scene.remove(q.ring);
+    q.ring.material.dispose();
+  }
+
+  // 标准的「冷却 → 前摇 → 施法」节奏；子类实现 pattern()
   tickAttack(dt, interval, windup) {
     if (this.stun > 0) return;
     if (this.charge > 0) {
@@ -292,12 +349,16 @@ class Boss {
     if (this.timer <= 0) this.charge = windup;
   }
 
+  behave() {}
+
   visuals() {}
 
   onWeakHit() { return null; }
 
   remove() {
     this.dead = true;
+    for (const q of this.queue) this.dropRing(q);
+    this.queue = [];
     this.scene.remove(this.group);
     for (const m of this.mats) m.dispose();
   }
@@ -310,45 +371,39 @@ function weakMat(boss, color = 0xfff3b0) {
   return m;
 }
 
-// ---------------- ① 守门炮台：点射 · 打断 ----------------
+// ---------------- ① 守门人：点射 · 打断 ----------------
 
 class GateBoss extends Boss {
   constructor(scene, theta, spawn) {
-    super('gate', scene, theta, spawn, { r: 24, body: [3, 4.2, 3], weakR: 0.55 });
+    super('gate', scene, theta, spawn, { weakR: 0.55, body: [2.4, 2.4, 2.4], fly: { speed: 9, hop: [0.6, 1.3], r: [13, 21], y: [2, 6] } });
     const m = this.mat(this.def.color);
-    this.part(new THREE.BoxGeometry(3.2, 2.4, 3.2), m, [0, 1.2, 0]);
-    this.part(new THREE.BoxGeometry(1.8, 1.3, 1.8), m, [0, 3.05, 0]);
-    this.part(new THREE.CylinderGeometry(0.32, 0.4, 1.6, 12).rotateX(Math.PI / 2), m, [0, 3.1, 1.3]);
-    this.muzzle = this.part(sphere(0.55), weakMat(this), [0, 3.1, 2.25], 'weak');
-    this.timer = 2.2;
+    this.part(new THREE.BoxGeometry(2.4, 2.0, 2.4), m, [0, 0, 0]);
+    this.part(new THREE.BoxGeometry(3.6, 0.3, 0.8), m, [0, 0.4, -0.4]);
+    this.muzzle = this.part(sphere(0.55), weakMat(this), [0, 0, 1.45], 'weak');
+    this.timer = 2;
   }
 
   phaseOf() { return this.frac < 0.5 ? 1 : 0; }
 
   behave(dt) {
-    this.tickAttack(dt, this.phaseIdx ? 1.6 : 1.8, 0.9);
+    this.tickAttack(dt, this.phaseIdx ? 2.1 : 2.5, 0.8);
   }
 
+  // 教学 Boss：一次 1–2 个普通弹，离你远一点，偶尔一个重弹
   pattern() {
-    const heavy = this.volley % 4 === 0;
-    if (this.phaseIdx === 0) {
-      if (heavy) this.fire('heavy', { y: 3.1 });
-      else if (this.volley % 4 === 2) for (const d of [-0.06, 0.06]) this.fire('normal', { y: 3.1, dTheta: d });
-      else this.fire('normal', { y: 3.1 });
-    } else {
-      if (heavy) this.fire('heavy', { y: 3.1 });
-      for (const d of heavy ? [-0.07, 0.07] : [-0.07, 0, 0.07]) this.fire('normal', { y: 3.1, dTheta: d });
-    }
+    const far = { r: [14, 20], spread: this.phaseIdx ? 1.1 : 0.7 };
+    if (this.volley % 5 === 0) this.cast('heavy', 1, { ...far, spread: 0.5 });
+    else this.cast('normal', this.phaseIdx || this.volley % 2 ? 2 : 1, far);
   }
 
   visuals() { this.setWeak(this.muzzle, this.charge > 0 || this.stun > 0); }
 
-  // 蓄力时打中炮口：打断这一轮，踉跄 1.2 秒
+  // 施法前摇时打中核心：打断这一轮，踉跄 1.2 秒
   onWeakHit() {
     if (this.charge <= 0) return null;
     this.charge = 0;
     this.stun = 1.2;
-    this.timer = this.phaseIdx ? 1.6 : 1.8;
+    this.timer = this.phaseIdx ? 2.1 : 2.5;
     return '打断！';
   }
 }
@@ -357,37 +412,28 @@ class GateBoss extends Boss {
 
 class FalconBoss extends Boss {
   constructor(scene, theta, spawn) {
-    super('falcon', scene, theta, spawn, { r: 17, body: [2.2, 2.2, 2.2], weakR: 0.42 });
-    this.y = 4.5;
-    this.bodyH = 0.3; // 原点在机身中心（不是脚下）：「胸口」= 原点 + 0.6 × bodyH 要落在机身上
+    super('falcon', scene, theta, spawn, { weakR: 0.42, body: [2.2, 2.2, 2.2], fly: { speed: 14, hop: [0.4, 0.9], r: [12, 20], y: [3, 8] } });
     const m = this.mat(this.def.color);
     this.part(new THREE.OctahedronGeometry(1.1), m, [0, 0, 0]);
     this.part(new THREE.BoxGeometry(4.4, 0.15, 1.0), m, [0, 0.1, -0.2]);
     this.eye = this.part(sphere(0.42), weakMat(this), [0, 0.15, 1.05], 'weak');
-    this.dir = Math.random() < 0.5 ? -1 : 1;
-    this.flip = rand(4, 7);
     this.eyeOpen = 0;
     this.timer = 1.8;
   }
 
   phaseOf() { return this.frac < 0.5 ? 1 : 0; }
+  speedMul() { return this.phaseIdx ? 1.25 : 1; }
 
   behave(dt) {
     this.eyeOpen = Math.max(0, this.eyeOpen - dt);
-    if (this.stun > 0) return;
-    this.flip -= dt;
-    if (this.flip <= 0) { this.dir = -this.dir; this.flip = rand(4, 7); }
-    this.theta += this.dir * (this.phaseIdx ? 0.45 : 0.3) * dt;
     this.tickAttack(dt, this.phaseIdx ? 1.9 : 2.3, 0.5);
   }
 
   pattern() {
-    const fast = this.phaseIdx ? 3 : 2;
-    if (this.volley % 2) {
-      for (let i = 0; i < fast; i++) this.fireLater(i * 0.3, 'fast', { y: 0, dTheta: (i - 1) * 0.03 });
-    } else {
-      this.fire('orbit', { y: 0, dir: Math.random() < 0.5 ? -1 : 1 });
-      if (this.phaseIdx) this.fireLater(0.2, 'fast', { y: 0 });
+    if (this.volley % 2) this.cast('fast', this.phaseIdx ? 3 : 2, { spread: 1.4 });
+    else {
+      this.cast('orbit', 1, { spread: 0.6, dir: Math.random() < 0.5 ? -1 : 1 });
+      if (this.phaseIdx) this.cast('fast', 1, { spread: 1.2 });
     }
     this.eyeOpen = 1.1;
   }
@@ -409,22 +455,22 @@ class FalconBoss extends Boss {
 
 class HiveBoss extends Boss {
   constructor(scene, theta, spawn) {
-    super('hive', scene, theta, spawn, { r: 25, body: [4, 6, 4], weakR: 0.75 });
+    super('hive', scene, theta, spawn, { weakR: 0.75, body: [4, 4, 4], fly: { speed: 7, hop: [0.8, 1.6], r: [15, 23], y: [3, 7] } });
     const m = this.mat(this.def.color);
-    this.part(sphere(2), m, [0, 4.5, 0]);
-    this.part(new THREE.CylinderGeometry(0.5, 0.8, 2.5, 10), m, [0, 1.25, 0]);
-    // 三个发射舱：分裂弹 / 重弹 / 蛇形弹，各自有血量，打爆就不再发射这种小球
-    const pods = [['split', [-3, 4.5, 0.5], 3.2, 1.2], ['heavy', [3, 4.5, 0.5], 4.6, 2.4], ['snake', [0, 7.4, 0.5], 2.6, 0.6]];
+    this.part(sphere(2), m, [0, 0, 0]);
+    // 三个发射舱：分裂弹 / 重弹 / 蛇形弹，各自有血量，打爆就不再生成这种小球
+    const pods = [['split', [-3, 0, 0.5], 3.2, 1.2], ['heavy', [3, 0, 0.5], 4.6, 2.4], ['snake', [0, 2.9, 0.5], 2.6, 0.6]];
     this.pods = pods.map(([kind, pos, every, first]) => {
-      const pod = { kind, x: pos[0], y: pos[1], every, timer: first, charge: 0, hp: 45, alive: true };
+      const pod = { kind, every, timer: first, charge: 0, hp: 45, alive: true };
       pod.mesh = this.part(new THREE.BoxGeometry(1.5, 1.5, 1.5), weakMat(this, ORBS[kind].color), pos, 'weak', { pod });
       return pod;
     });
-    this.eye = this.part(sphere(0.75), weakMat(this), [0, 4.5, 1.9], 'weak');
+    this.eye = this.part(sphere(0.75), weakMat(this), [0, 0, 1.9], 'weak');
     this.timer = 2;
   }
 
   phaseOf() { return this.pods.every((p) => !p.alive) ? 1 : 0; }
+  speedMul() { return this.phaseIdx ? 1.6 : 1; }
 
   behave(dt) {
     if (this.stun > 0) return;
@@ -432,16 +478,14 @@ class HiveBoss extends Boss {
       if (!p.alive) continue;
       if (p.charge > 0) {
         p.charge -= dt;
-        if (p.charge <= 0) { this.fire(p.kind, { y: p.y, dTheta: p.x / this.r }); p.timer = p.every; }
+        if (p.charge <= 0) { this.cast(p.kind, 1, { spread: 1.1 }); p.timer = p.every; }
       } else if ((p.timer -= dt) <= 0) p.charge = 0.6;
     }
-    // 三个舱都拆掉后：核心张开，改发普通弹扇形
+    // 三个舱都拆掉后：核心暴露，飞得更快，改成一次 3 个普通弹
     if (this.phaseIdx) this.tickAttack(dt, 2.0, 0.7);
   }
 
-  pattern() {
-    for (const d of [-0.08, 0, 0.08]) this.fire('normal', { y: 4.5, dTheta: d });
-  }
+  pattern() { this.cast('normal', 3, { spread: 1.4 }); }
 
   get status() {
     if (this.stun > 0) return '踉跄';
@@ -453,7 +497,7 @@ class HiveBoss extends Boss {
     for (const p of this.pods) {
       if (!p.alive) continue;
       this.setWeak(p.mesh, true);
-      // 舱的颜色 = 它发射的小球的颜色；前摇时发白
+      // 舱的颜色 = 它生成的小球的颜色；前摇时发白
       p.mesh.material.emissive.setHex(p.charge > 0 ? 0xffffff : ORBS[p.kind].color);
     }
     this.setWeak(this.eye, this.phaseIdx === 1);
@@ -477,58 +521,34 @@ class HiveBoss extends Boss {
 
 class FinalBoss extends Boss {
   constructor(scene, theta, spawn) {
-    super('final', scene, theta, spawn, { r: 20, body: [2, 5.4, 1.5], weakR: 0.5 });
+    super('final', scene, theta, spawn, { weakR: 0.5, body: [2, 5.4, 1.5], fly: { speed: 11, hop: [0.35, 0.8], r: [12, 20], y: [2.5, 7] } });
     const m = this.mat(this.def.color);
-    this.part(new THREE.BoxGeometry(2, 4, 1.5), m, [0, 2, 0]);
-    this.part(new THREE.BoxGeometry(1.4, 1.4, 1.4), m, [0, 4.7, 0]);
+    this.part(new THREE.BoxGeometry(2, 4, 1.5), m, [0, 0, 0]);
+    this.part(new THREE.BoxGeometry(1.4, 1.4, 1.4), m, [0, 2.7, 0]);
     // 核心绕着身体转，转到身体后面时会被挡住
-    this.core = this.part(sphere(0.5), weakMat(this), [0, 3, 1.7], 'weak');
-    this.vs = 0;
-    this.sdir = 1;
-    this.hold = rand(0.5, 1.2);
-    this.vy = 0;
-    this.jumpT = rand(3, 5);
+    this.core = this.part(sphere(0.5), weakMat(this), [0, 1, 1.7], 'weak');
     this.clearCD = 0;
     this.timer = 2;
   }
 
-  get mobile() { return true; }
-
   phaseOf() { return this.frac < 1 / 3 ? 2 : this.frac < 2 / 3 ? 1 : 0; }
+  speedMul() { return [1, 1.25, 1.5][this.phaseIdx]; }
 
   behave(dt) {
     this.clearCD = Math.max(0, this.clearCD - dt);
     const a = this.age * 1.6;
-    this.core.position.set(Math.sin(a) * 1.7, 3, Math.cos(a) * 1.7);
-    if (this.stun > 0) return;
-    // ADAD 横移 + 偶尔跳跃，第三阶段更快
-    const speed = [3.5, 4.5, 5.5][this.phaseIdx];
-    this.hold -= dt;
-    if (this.hold <= 0) { this.sdir = -this.sdir; this.hold = rand(0.5, 1.2); }
-    if (Math.abs(this.s) > 6) this.sdir = -Math.sign(this.s);
-    this.vs += clamp(this.sdir * speed - this.vs, -14 * dt, 14 * dt);
-    this.s = clamp(this.s + this.vs * dt, -6.5, 6.5);
-    if (this.y > 0 || this.vy > 0) {
-      this.vy -= 20 * dt;
-      this.y = Math.max(0, this.y + this.vy * dt);
-      if (this.y === 0) this.vy = 0;
-    } else if ((this.jumpT -= dt) <= 0) {
-      this.vy = 9;
-      this.y = 0.01;
-      this.jumpT = rand(3, 5);
-    }
+    this.core.position.set(Math.sin(a) * 1.7, 1, Math.cos(a) * 1.7);
     this.tickAttack(dt, [1.6, 1.35, 1.0][this.phaseIdx], 0.45);
   }
 
   pattern() {
     const v = this.volley;
-    const fan = (kind, n = 3) => { for (let i = 0; i < n; i++) this.fire(kind, { dTheta: (i - (n - 1) / 2) * 0.07 }); };
     if (this.phaseIdx === 0) {
-      if (v % 2) fan('normal'); else { this.fire('snake'); this.fireLater(0.25, 'snake'); }
+      if (v % 2) this.cast('normal', 3, { spread: 1.2 }); else this.cast('snake', 2, { spread: 1.0 });
     } else if (this.phaseIdx === 1) {
-      [() => fan('normal'), () => this.fire('split'), () => { this.fire('orbit', { dir: 1 }); this.fire('orbit', { dir: -1 }); }, () => { this.fire('snake'); this.fireLater(0.25, 'snake'); }][v % 4]();
+      [() => this.cast('normal', 3, { spread: 1.5 }), () => this.cast('split', 1), () => this.cast('orbit', 2, { spread: Math.PI }), () => this.cast('snake', 2)][v % 4]();
     } else {
-      [() => fan('fast'), () => this.fire('heavy'), () => { this.fire('split'); this.fireLater(0.2, 'fast'); }, () => { this.fire('orbit'); this.fire('snake'); }][v % 4]();
+      [() => this.cast('fast', 3, { spread: Math.PI }), () => this.cast('heavy', 1), () => { this.cast('split', 1); this.cast('fast', 1, { spread: 1.5 }); }, () => { this.cast('orbit', 1, { spread: Math.PI }); this.cast('snake', 1); }][v % 4]();
     }
   }
 

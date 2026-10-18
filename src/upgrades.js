@@ -78,19 +78,19 @@ export const UPGRADES = {
     desc: '子弹时间变为 1.2 秒，敌人完全静止。其他强化的时长加成只按一半生效。' },
   freezeframe: { cat: 'school', school: 'time', set: '时停', icon: '▣', name: '定格', desc: '子弹时间中所有伤害 +40%。' },
   timebank: { cat: 'school', school: 'time', set: '时停', icon: '⏳', name: '时间余量', desc: '子弹时间中每造成 10 点伤害，时长 +0.15 秒（每次最多 +1.5 秒）。' },
-  reckoning: { cat: 'school', school: 'time', set: '时停', icon: '⚖', name: '清算', desc: '子弹时间结束时，期间被你命中过、还活着的敌人各受 4 点伤害。' },
-  stasisround: { cat: 'school', school: 'time', set: '时停', icon: '❄', name: '凝滞弹', desc: '子弹时间中被命中过的敌人，结束后额外减速 50% 1 秒。' },
+  phaseround: { cat: 'school', school: 'time', set: '时停', icon: '⇉', name: '相位弹', desc: '子弹时间中，子弹会穿透 1 个目标（伤害 ×0.6）。' },
+  chill: { cat: 'school', school: 'time', set: '时停', icon: '❄', name: '冻结弹', desc: '子弹时间中被命中的敌人，本次子弹时间内移动速度再 −50%。' },
   // ② 续杯
   afterglow: { cat: 'core', school: 'time', set: '续杯', icon: '☀', name: '余韵', desc: '子弹时间中每次击杀，时长 +0.25 秒（每次最多 +2 秒）。' },
   focuslens: { cat: 'school', school: 'time', set: '续杯', icon: '◐', name: '专注透镜', desc: '专注充能 +40%，子弹时间 +0.5 秒。' },
-  echo: { cat: 'school', school: 'time', set: '续杯', icon: '〰', name: '回响', desc: '一次子弹时间内击杀 ≥ 3 个，结束后返还 30% 专注。' },
+  harvest: { cat: 'school', school: 'time', set: '续杯', icon: '⚘', name: '时之收割', desc: '子弹时间中的击杀，金币 ×1.5。' },
   timeslit: { cat: 'school', school: 'time', set: '续杯', icon: '⧗', name: '时间缝隙', desc: '子弹时间中换弹瞬间完成。' },
   reloadmoment: { cat: 'school', school: 'time', set: '续杯', icon: '▤', name: '装填时刻', desc: '释放子弹时间时，弹匣立刻装满（正在换弹也直接完成）。' },
   // ③ 高频
-  timedebt: { cat: 'core', school: 'time', set: '高频', icon: '⧖', name: '时间债', locked: true,
-    desc: '专注 ≥ 25% 即可释放，时长按专注比例；结束后敌人以 1.5 倍速移动，持续时间与本次子弹时间相同。' },
+  blink: { cat: 'core', school: 'time', set: '高频', icon: '⧖', name: '瞬时', locked: true,
+    desc: '专注分成 4 格：每攒满 1 格就能释放 1 秒子弹时间，子弹时间中可以继续释放来延长。' },
   fragment: { cat: 'school', school: 'time', set: '高频', icon: '◔', name: '碎片化', desc: '子弹时间时长减半，充满专注所需点数也减半。' },
-  inertia: { cat: 'school', school: 'time', set: '高频', icon: '↝', name: '惯性', desc: '子弹时间结束后，敌人用 1.2 秒慢慢恢复速度（原本 0.2 秒）。' },
+  timeblade: { cat: 'school', school: 'time', set: '高频', icon: '↝', name: '时之刃', desc: '子弹时间中爆头伤害 +50%。' },
   overclock: { cat: 'school', school: 'time', set: '高频', icon: '⚡', name: '加速世界', desc: '子弹时间中射速 +30%。' },
 
   // ---------------- 通用 ----------------

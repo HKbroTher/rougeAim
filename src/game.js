@@ -324,15 +324,7 @@ export class Game {
     this.pitch = 0;
     this.reactions = [];
     this.clearBots();
-    // 开局三选一：命盘里的流派徽记卡和「开局补给」
     this.openingPicks = [];
-    const run = this.run;
-    for (const c of CARDS) {
-      const school = { h_badge: 'head', s_badge: 'spray', t_badge: 'time' }[c.id];
-      if (!school || !R.hasCard(run, c.id)) continue;
-      for (let k = 0; k < R.cv(run, c.id); k++) this.openingPicks.push({ title: `${c.name} · 选择一个${SCHOOLS[school].name}强化`, opts: { school } });
-    }
-    for (let k = 0; run.extraChoice && k < R.cv(run, 'e_supply'); k++) this.openingPicks.push({ title: '开局补给 · 选择一个强化', opts: {} });
     this.nextOpeningPick();
   }
 
@@ -539,17 +531,13 @@ export class Game {
   // wdt 为世界时间：敌人移动、出怪节奏、特效用它，子弹时间里会变慢。
   update(dt) {
     const run = this.run;
-    // 子弹时间 / 时间债计时（真实时间）
+    // 子弹时间计时（真实时间）
     if (run.focusTime > 0) {
       run.focusTime = Math.max(0, run.focusTime - dt);
       if (run.focusTime === 0) this.onBulletTimeEnd();
-    } else if (run.debtTime > 0) {
-      run.debtTime = Math.max(0, run.debtTime - dt);
     }
-    const target = run.focusTime > 0 ? R.bulletTimeScale(run) : run.debtTime > 0 ? 1.5 : 1;
-    // 惯性：退出子弹时间时用 2 秒慢慢恢复
-    const recovering = target > this.worldScale && run.focusTime <= 0 && R.has(run, 'inertia');
-    const rate = recovering ? dt * (1 - FOCUS.timeScale) / 1.2 : dt / FOCUS.ramp;
+    const target = run.focusTime > 0 ? R.bulletTimeScale(run) : 1;
+    const rate = dt / FOCUS.ramp;
     this.worldScale += Math.max(-rate, Math.min(rate, target - this.worldScale));
     const wdt = dt * this.worldScale;
     this.waveTime += wdt;
@@ -573,7 +561,6 @@ export class Game {
     while (this.yawHist.length && this.yawHist[0].t < this.time - 0.4) this.yawHist.shift();
     this.flickReady = R.has(run, 'flickmaster') && this.yawHist.some((h) => Math.abs(h.yaw - this.yaw) >= Math.PI / 3);
     R.tickRating(run, dt);
-    if (R.tickShieldGen(run, dt)) { sfx.shield(); this.floatCenter('护盾发生器 +1', 'info'); }
 
     // 视野检测：用于「甩枪反应」统计
     this.camera.updateMatrixWorld();
@@ -681,6 +668,8 @@ export class Game {
     if (head) sfx.headshot(); else sfx.hit();
     if (flick) this.floatCenter('甩枪！', 'head');
     if (run.bt) run.bt.hitBots.add(bot);
+    // 冻结弹：子弹时间中被命中的敌人，本次子弹时间内再减速 50%（slowTime 按世界时间走）
+    if (R.inBulletTime(run) && R.has(run, 'chill')) bot.slowTime = Math.max(bot.slowTime || 0, run.focusTime * R.bulletTimeScale(run) + 0.02);
 
     if (R.has(run, 'suppress')) bot.suppress = Math.min(5, (bot.suppress || 0) + 1);
     const fullHeat = R.has(run, 'overheat') && run.heat >= 20;
@@ -695,6 +684,7 @@ export class Game {
     }
     if (head && R.has(run, 'headblast')) this.headBlast(bot.position.clone(), bot);
     if (head && R.has(run, 'pierce')) this.pierce(hit.point, this.raycaster.ray.direction.clone(), bot, dmg);
+    else if (R.inBulletTime(run) && R.has(run, 'phaseround')) this.pierce(hit.point, this.raycaster.ray.direction.clone(), bot, dmg, { phase: true });
   }
 
   // 对 bot 造成伤害：评级、专注都按实际扣掉的血量算；打死则结算击杀
@@ -719,6 +709,8 @@ export class Game {
       if (R.has(run, 'lethal')) d += 1.5;
       d += R.cv(run, 'h_aim');
       d *= 1 + R.cv(run, 'h_pierce') / 100;
+      if (bot.distance > 12) d *= 1 + R.cv(run, 'h_badge') / 100;      // 狙击手
+      if (R.inBulletTime(run) && R.has(run, 'timeblade')) d *= 1.5;   // 时之刃
       d += execBonus;
       if (R.has(run, 'hawkeye') && bot.distance > 15) d *= 1.5;
       if (flick) d *= 2;
@@ -730,6 +722,8 @@ export class Game {
     d *= R.tempDamageMul(run);
     if (R.inBulletTime(run) && R.has(run, 'freezeframe')) d *= 1.4;
     if (R.inBulletTime(run)) d *= 1 + R.cv(run, 't_stasis') / 100;
+    if (run.sprayTime > 1) d *= 1 + R.cv(run, 's_badge') / 100;       // 火力延续
+    d *= 1 + R.cv(run, 'w_full') / 100;                                // 同心
     if (R.has(run, 'overheat')) d *= 1 + 0.03 * run.heat;
     if (R.has(run, 'rend') && bot.hitsTaken % 3 === 0) d *= 2.5;
     if (R.has(run, 'shred')) {
@@ -740,12 +734,13 @@ export class Game {
   }
 
   // 穿颅弹：从命中点沿弹道继续，最多再穿 2 个目标；打到身体就停下
-  pierce(from, dir, firstBot, shotDmg) {
+  // phase：相位弹（子弹时间中穿透 1 个目标，×0.6，不要求爆头）
+  pierce(from, dir, firstBot, shotDmg, { phase = false } = {}) {
     const run = this.run;
     const exclude = new Set([firstBot]);
     let origin = from.clone().addScaledVector(dir, 0.05);
     const rc = new THREE.Raycaster(origin, dir, 0, WEAPON.range);
-    for (let n = 0; n < 2; n++) {
+    for (let n = 0; n < (phase ? 1 : 2); n++) {
       rc.set(origin, dir);
       const meshes = this.bots.filter((b) => !b.dead && !exclude.has(b)).flatMap((b) => b.hitMeshes);
       const h = rc.intersectObjects(meshes, false)[0];
@@ -753,7 +748,7 @@ export class Game {
       const { bot, part } = h.object.userData;
       const head = part === 'head';
       this.world.fx.tracer(origin, h.point, 0xffd166);
-      const dmg = head ? shotDmg * 0.75 : WEAPON.damage * (R.has(run, 'guillotine') ? 0.5 : 1);
+      const dmg = phase ? shotDmg * 0.6 : head ? shotDmg * 0.75 : WEAPON.damage * (R.has(run, 'guillotine') ? 0.5 : 1);
       R.registerHit(run, head, { extra: true });
       this.hurtBot(bot, dmg, { head, indirect: true });
       exclude.add(bot);
@@ -784,7 +779,8 @@ export class Game {
     if (R.has(run, 'bounty')) base += (ctx.head && !ctx.indirect ? 1 : 0) + (ctx.onetap ? 2 : 0);
     if (ctx.onetap) base *= 1 + R.cv(run, 'h_flick') / 100;
     const glance = ctx.head && R.has(run, 'glance') && bot.offscreenAt != null && this.time - bot.offscreenAt <= 1;
-    const gold = R.killGold(run, base, (glance ? 2 : 1) * (bot.type === 'heavy' && R.has(run, 'bountyhunter') ? 2 : 1));
+    const harvest = R.inBulletTime(run) && R.has(run, 'harvest') ? 1.5 : 1;
+    const gold = R.killGold(run, base, (glance ? 2 : 1) * harvest * (bot.type === 'heavy' && R.has(run, 'bountyhunter') ? 2 : 1));
     if (R.has(run, 'onetap') && ctx.head && !ctx.indirect) R.refundAmmo(run, ctx.onetap ? 3 : 1);
     R.onKillInBulletTime(run);
     const pos = bot.headWorld;
@@ -847,18 +843,7 @@ export class Game {
   }
 
   onBulletTimeEnd() {
-    const bt = R.endBulletTime(this.run);
-    if (R.has(this.run, 'stasisround')) {
-      for (const b of bt.hitBots) if (!b.dead) b.slowTime = Math.max(b.slowTime, 1);
-    }
-    if (R.has(this.run, 'reckoning')) {
-      for (const b of bt.hitBots) {
-        if (b.dead) continue;
-        this.world.fx.burst(b.headWorld, 0xc77dff, 10, 3);
-        this.hurtBot(b, 4, { indirect: true });
-      }
-    }
-    if (this.run.debtTime > 0) this.floatCenter('时间债：敌人加速', 'warn');
+    R.endBulletTime(this.run);
   }
 
   headBlast(center, source) {

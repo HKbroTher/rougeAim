@@ -569,7 +569,6 @@ export class UI {
     fw.classList.toggle('ready', ready);
     fw.classList.toggle('active', active);
     $('focus-hint').textContent = active ? `${R.has(run, 'stasis') ? '时停' : '子弹时间'} ${run.focusTime.toFixed(1)}s`
-      : run.debtTime > 0 ? `时间债：敌人加速 ${run.debtTime.toFixed(1)}s`
         : ready ? '子弹时间就绪：右键 / E / 空格' : '专注充能中（造成伤害充能）';
     $('focus-overlay').classList.toggle('on', active);
     $('view').classList.toggle('slowmo', active);

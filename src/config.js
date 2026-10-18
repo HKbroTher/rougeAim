@@ -168,7 +168,7 @@ function makeWave(n) {
 export const BOSS_WAVES = { 5: 'gate', 10: 'falcon', 15: 'hive', 20: 'final' };
 
 // ---------------- Boss 战 ----------------
-// Boss 不冲过来，只在远处发射小球。小球飞到你身上才扣血，打一下就碎（重弹要打好几下）。
+// Boss 在你周围高速乱飞，施法时在空中随机位置生成小球（先出现预警光圈）。小球飞到你身上才扣血，打一下就碎（重弹要打好几下）。
 // 打 Boss 的弱点 = 爆头（爆头倍率和爆头流强化都生效），并触发这个 Boss 的专属效果；
 // 打身体只有 50% 伤害，持续开火 2 秒内逐渐升到 100%（打空也算持续开火）。
 export const BOSS = {
@@ -178,9 +178,9 @@ export const BOSS = {
 };
 
 export const BOSSES = {
-  gate: { name: '守门炮台', skill: '点射 · 打断', hp: 320, gold: 50, color: 0x8d99ae, weakText: '蓄力时打炮口 → 打断这一轮攻击并踉跄' },
-  falcon: { name: '游隼', skill: '甩枪 · 破绽', hp: 360, gold: 70, color: 0x48cae4, weakText: '发射后眼睛张开 1 秒，打中 → 破绽：停住 1.5 秒、受到伤害 +50%' },
-  hive: { name: '蜂巢', skill: '切换目标 · 拆除', hp: 480, gold: 90, color: 0xb5838d, weakText: '三个发射舱就是弱点，打爆一个，这种小球就不会再出现' },
+  gate: { name: '守门人', skill: '点射 · 打断', hp: 320, gold: 50, color: 0x8d99ae, weakText: '施法前摇时核心发光，打中 → 打断这一轮并踉跄' },
+  falcon: { name: '游隼', skill: '甩枪 · 破绽', hp: 360, gold: 70, color: 0x48cae4, weakText: '施法后眼睛张开 1 秒，打中 → 破绽：停住 1.5 秒、受到伤害 +50%' },
+  hive: { name: '蜂巢', skill: '切换目标 · 拆除', hp: 480, gold: 90, color: 0xb5838d, weakText: '三个发射舱就是弱点（颜色 = 它生成的小球），打爆一个，这种小球就不会再出现' },
   final: { name: '终局', skill: '跟枪 · 清屏', hp: 700, gold: 120, color: 0xe63946, weakText: '绕着身体旋转的核心，打中 → 场上所有小球碎掉（4 秒冷却）' },
 };
 
@@ -318,34 +318,34 @@ export const CARD_CATS = {
 const pct = (v) => `${v}%`;
 export const CARDS = [
   // 第 1 行
-  { id: 'h_aim', pos: [0, 0], cat: 'head', icon: '⌖', name: '准星校准', cost: 1, unlock: 0, vals: [1, 1.5, 2, 3], desc: '爆头伤害 +{v}。' },
+  { id: 'h_aim', pos: [0, 0], cat: 'head', icon: '⌖', name: '准星校准', cost: 1, unlock: 0, vals: [0.5, 0.75, 1, 1.5], desc: '爆头伤害 +{v}。' },
   { id: 'h_pierce', pos: [0, 1], cat: 'head', icon: '⇶', name: '处刑人', cost: 2, unlock: 70, unlocks: ['pierce'], vals: [10, 15, 20, 30], fmt: pct,
     desc: '爆头伤害 +{v}；三选一中爆头流强化的出现权重 +60%。', unlockText: '解锁即让核心「穿颅弹」进入奖池' },
-  { id: 'w_full', pos: [0, 2], cat: 'wake', icon: '◉', name: '同心', cost: 0, unlock: 90, wake: 'row', vals: [4, 8, 12, 16],
-    desc: '每波开始护盾补到 1 层，并回复 {v} 生命。', needText: '所在的第 1 行其余 4 张卡全部装备' },
+  { id: 'w_full', pos: [0, 2], cat: 'wake', icon: '◉', name: '同心', cost: 0, unlock: 90, wake: 'row', vals: [5, 8, 11, 15], fmt: pct,
+    desc: '所有伤害 +{v}。', needText: '所在的第 1 行其余 4 张卡全部装备' },
   { id: 's_heat', pos: [0, 3], cat: 'spray', icon: '♨', name: '熔炉', cost: 2, unlock: 70, unlocks: ['overheat'], vals: [8, 12, 16, 22], fmt: pct,
     desc: '射速 +{v}；三选一中扫射流强化的出现权重 +60%。', unlockText: '解锁即让核心「过热枪管」及其配套进入奖池' },
   { id: 's_mag', pos: [0, 4], cat: 'spray', icon: '▥', name: '扩容', cost: 1, unlock: 0, vals: [3, 5, 7, 10], desc: '弹匣 +{v}。' },
   // 第 2 行
-  { id: 'h_badge', pos: [1, 0], cat: 'head', icon: '🎯', name: '猎手徽记', cost: 4, unlock: 110, opening: true, vals: [1, 2, 3, 4], desc: '开局额外 {v} 次「爆头流三选一」。' },
-  { id: 'v_body', pos: [1, 1], cat: 'tol', icon: '♥', name: '强健体魄', cost: 1, unlock: 0, vals: [30, 45, 60, 75], desc: '生命上限 +{v}。' },
-  { id: 'v_shield', pos: [1, 2], cat: 'tol', icon: '◈', name: '护盾发生器', cost: 2, unlock: 40, vals: [30, 22, 16, 12], fmt: (v) => `${v} 秒`, desc: '开局 1 层护盾；之后每 {v}获得 1 层护盾（最多存 2 层）。' },
-  { id: 'v_aid', pos: [1, 3], cat: 'tol', icon: '✚', name: '战地急救', cost: 2, unlock: 50, vals: [10, 14, 18, 22], desc: '每波结束回复 {v} 生命。' },
-  { id: 's_badge', pos: [1, 4], cat: 'spray', icon: '🥁', name: '弹药大师', cost: 4, unlock: 110, opening: true, vals: [1, 2, 3, 4], desc: '开局额外 {v} 次「扫射流三选一」。' },
+  { id: 'h_badge', pos: [1, 0], cat: 'head', icon: '🎯', name: '狙击手', cost: 4, unlock: 110, vals: [20, 30, 40, 55], fmt: pct, desc: '对 12 米外的目标，爆头伤害 +{v}。' },
+  { id: 'v_body', pos: [1, 1], cat: 'tol', icon: '♥', name: '强健体魄', cost: 1, unlock: 0, vals: [15, 25, 35, 50], desc: '生命上限 +{v}。' },
+  { id: 'v_shield', pos: [1, 2], cat: 'tol', icon: '◈', name: '磨砺', cost: 2, unlock: 40, vals: [8, 12, 16, 22], desc: '每打完一个区域（第 5、10、15 波），生命上限 +{v}，并回复同样多的生命。' },
+  { id: 'v_aid', pos: [1, 3], cat: 'tol', icon: '✚', name: '老兵', cost: 2, unlock: 50, vals: [10, 15, 20, 26], fmt: pct, desc: '从第 6 波开始，受到的伤害 −{v}。' },
+  { id: 's_badge', pos: [1, 4], cat: 'spray', icon: '🥁', name: '火力延续', cost: 4, unlock: 110, vals: [10, 15, 20, 28], fmt: pct, desc: '持续开火超过 1 秒后，伤害 +{v}。' },
   // 第 3 行
   { id: 'h_flick', pos: [2, 0], cat: 'head', icon: '↯', name: '回旋', cost: 3, unlock: 90, unlocks: ['flickmaster', 'hawkeye'], vals: [50, 75, 100, 150], fmt: pct,
     desc: '一枪击杀的目标，金币 +{v}。', unlockText: '解锁即让核心「甩枪大师」和「鹰眼弹」进入奖池' },
-  { id: 'e_stake', pos: [2, 1], cat: 'econ', icon: '●', name: '随身盘缠', cost: 1, unlock: 40, vals: [40, 70, 100, 150], desc: '开局携带 {v} 金币。' },
+  { id: 'e_stake', pos: [2, 1], cat: 'econ', icon: '●', name: '随身盘缠', cost: 1, unlock: 40, vals: [20, 35, 50, 70], desc: '开局携带 {v} 金币。' },
   { id: 'w_few', pos: [2, 2], cat: 'wake', icon: '☍', name: '独行', cost: 0, unlock: 110, wake: 'few', vals: [1, 2, 3, 4],
     desc: '每打完一个区域（第 5、10、15 波），随机激活 {v} 张已解锁但没装备的卡，本局有效。', needText: '装备的卡不超过 4 张' },
   { id: 'e_fate', pos: [2, 3], cat: 'econ', icon: '🎲', name: '命运之手', cost: 2, unlock: 50, vals: [2, 3, 4, 5], desc: '开局多 {v} 个命运骰。' },
   { id: 's_suppress', pos: [2, 4], cat: 'spray', icon: '⊗', name: '镇压者', cost: 3, unlock: 90, unlocks: ['suppress'], vals: [15, 22, 30, 40], fmt: pct,
     desc: '换弹时间 −{v}。', unlockText: '解锁即让核心「压制火力」进入奖池' },
   // 第 4 行
-  { id: 't_badge', pos: [3, 0], cat: 'time', icon: '⏳', name: '时之沙', cost: 4, unlock: 110, opening: true, vals: [1, 2, 3, 4], desc: '开局额外 {v} 次「子弹时间流三选一」。' },
-  { id: 'v_death', pos: [3, 1], cat: 'tol', icon: '✺', name: '死亡抗拒', cost: 4, unlock: 90, vals: [60, 70, 85, 100], fmt: pct,
-    desc: '每局一次：受到致命伤害时不会死，生命回复到 {v}。' },
-  { id: 'e_supply', pos: [3, 2], cat: 'econ', icon: '✧', name: '开局补给', cost: 3, unlock: 100, opening: true, vals: [1, 2, 3, 4], desc: '开局额外 {v} 次强化三选一。' },
+  { id: 't_badge', pos: [3, 0], cat: 'time', icon: '⏳', name: '时之沙', cost: 4, unlock: 110, vals: [15, 25, 35, 50], fmt: pct, desc: '每波开始，专注 +{v}。' },
+  { id: 'v_death', pos: [3, 1], cat: 'tol', icon: '✺', name: '死亡抗拒', cost: 4, unlock: 90, vals: [1, 2, 3, 4], fmt: (v) => `${v} 次`,
+    desc: '每局可以复活 {v}：受到致命伤害时不会死，生命回复到 50%。' },
+  { id: 'e_supply', pos: [3, 2], cat: 'econ', icon: '✧', name: '讨价还价', cost: 3, unlock: 100, vals: [8, 12, 16, 22], fmt: pct, desc: '卡戎商店的强化价格 −{v}。' },
   { id: 'v_grit', pos: [3, 3], cat: 'tol', icon: '⛨', name: '背水', cost: 4, unlock: 110, vals: [18, 22, 26, 30], fmt: pct, desc: '受到的伤害 −{v}；生命低于 40% 时效果翻倍。' },
   { id: 'e_star', pos: [3, 4], cat: 'econ', icon: '✦', name: '观星者', cost: 3, unlock: 70, unlocks: ['starmap', 'bloodpact'], vals: [30, 45, 60, 80], fmt: pct,
     desc: '商店星尘兑换量 +{v}。', unlockText: '解锁即让「星图」「血色契约」进入奖池' },
@@ -354,11 +354,11 @@ export const CARDS = [
   { id: 't_stasis', pos: [4, 1], cat: 'time', icon: '⏸', name: '凝固之钟', cost: 2, unlock: 70, unlocks: ['stasis'], vals: [15, 20, 25, 35], fmt: pct,
     desc: '子弹时间中伤害 +{v}；三选一中子弹时间流强化的出现权重 +60%。', unlockText: '解锁即让核心「时停」进入奖池' },
   { id: 'w_rank', pos: [4, 2], cat: 'wake', icon: '♛', name: '凯旋', cost: 0, unlock: 70, wake: 'adjAll', vals: [15, 20, 30, 40], fmt: pct,
-    desc: '击杀金币 +{v}。', needText: '上下左右相邻的卡（开局补给、凝固之钟、借来的时间）全部装备' },
-  { id: 't_debt', pos: [4, 3], cat: 'time', icon: '⧖', name: '借来的时间', cost: 3, unlock: 90, unlocks: ['timedebt'], vals: [0.6, 0.9, 1.2, 1.6], fmt: (v) => `${v} 秒`,
-    desc: '子弹时间 +{v}。', unlockText: '解锁即让核心「时间债」进入奖池' },
+    desc: '击杀金币 +{v}。', needText: '上下左右相邻的卡（讨价还价、凝固之钟、刹那）全部装备' },
+  { id: 't_debt', pos: [4, 3], cat: 'time', icon: '⧖', name: '刹那', cost: 3, unlock: 90, unlocks: ['blink'], vals: [0.6, 0.9, 1.2, 1.6], fmt: (v) => `${v} 秒`,
+    desc: '子弹时间 +{v}。', unlockText: '解锁即让核心「瞬时」进入奖池' },
   { id: 'w_star', pos: [4, 4], cat: 'wake', icon: '✶', name: '群星', cost: 0, unlock: 90, wake: 'adjOne', vals: [15, 20, 25, 30], fmt: pct,
-    desc: '结算星尘 +{v}，开局多 1 个命运骰。', needText: '相邻的卡（观星者、借来的时间）至少装备一张' },
+    desc: '结算星尘 +{v}，开局多 1 个命运骰。', needText: '相邻的卡（观星者、刹那）至少装备一张' },
 ];
 
 export const cardValue = (card, lv) => card.vals[Math.max(0, Math.min(card.vals.length, lv) - 1)];

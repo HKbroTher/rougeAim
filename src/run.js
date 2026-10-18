@@ -14,8 +14,8 @@ export function createRun(save) {
     maxHp,
     cards,
     cardLv: levels,
-    shield: cards.has('v_shield') ? 1 : 0, // 护盾发生器：开局 1 层，之后定时补
-    shieldTimer: 0,
+    shield: 0,
+    revivesLeft: cv('v_death'), // 死亡抗拒：可以复活的次数
     gold: cv('e_stake'),
     // 火力评级：tier 0..4（D..S），points 当前等级的进度，idle 多久没造成伤害
     rating: { tier: 0, points: 0, idle: 0, peak: 0 },
@@ -26,7 +26,6 @@ export function createRun(save) {
     focus: 0,
     focusTime: 0,
     focusTotal: 0,   // 本次子弹时间的总时长（HUD 用）
-    debtTime: 0,     // 时间债：敌人加速的剩余时间
     bt: null,        // 本次子弹时间的统计：{ kills, dmg, ext, bankExt, hitBots }
     ammo: 0,
     reloadLeft: 0,
@@ -42,7 +41,6 @@ export function createRun(save) {
     keepsake,
     keepsakeLv: keepsake ? 1 : 0,
     unlocked: unlockedUpgrades(save),
-    extraChoice: cards.has('e_supply'),
     waveIndex: 0,
     wavesSinceCore: 0,
     rerolls: SHOP.rerollTokensStart + cv('e_fate') + (cards.has('w_star') ? 1 : 0), // 命运骰
@@ -98,17 +96,6 @@ function dropTier(run) {
   run.stats.tierDrops++;
 }
 
-// 护盾发生器：每隔一段时间获得 1 层护盾（最多存 2 层）。只在战斗中计时（真实时间）
-export function tickShieldGen(run, dt) {
-  const every = cv(run, 'v_shield');
-  if (!every) return false;
-  if (run.shield >= 2) { run.shieldTimer = 0; return false; }
-  run.shieldTimer += dt;
-  if (run.shieldTimer < every) return false;
-  run.shieldTimer = 0;
-  run.shield++;
-  return true;
-}
 
 // 每帧：一段时间没造成伤害就慢慢回落（稳定火力：不回落）
 export function tickRating(run, dt) {
@@ -241,19 +228,26 @@ function addFocus(run, amount) {
   run.focus = Math.min(focusMax(run), run.focus + gain);
 }
 
+// 瞬时：专注分 4 格，每格单独释放 1 秒，子弹时间中可以继续释放来延长
 export function canActivateFocus(run) {
-  if (inBulletTime(run) || run.debtTime > 0) return false;
-  const need = has(run, 'timedebt') ? focusMax(run) * 0.25 : focusMax(run);
-  return run.focus >= need - 1e-6;
+  if (has(run, 'blink')) return run.focus >= focusMax(run) * 0.25 - 1e-6;
+  if (inBulletTime(run)) return false;
+  return run.focus >= focusMax(run) - 1e-6;
 }
 
 export function activateFocus(run) {
   if (!canActivateFocus(run)) return false;
   // 装填时刻：释放子弹时间时弹匣立刻装满
   if (has(run, 'reloadmoment')) { run.reloadLeft = 0; run.ammo = magSize(run); }
-  const frac = has(run, 'timedebt') ? run.focus / focusMax(run) : 1;
-  run.focus = 0;
-  run.focusTime = focusDuration(run) * frac;
+  if (has(run, 'blink')) {
+    run.focus -= focusMax(run) * 0.25;
+    const sec = focusDuration(run) / FOCUS.duration; // 1 秒，按其他强化的时长加成等比放大
+    if (inBulletTime(run)) { run.focusTime += sec; run.focusTotal += sec; return true; }
+    run.focusTime = sec;
+  } else {
+    run.focus = 0;
+    run.focusTime = focusDuration(run);
+  }
   run.focusTotal = run.focusTime;
   run.bt = { kills: 0, dmg: 0, bankAcc: 0, ext: 0, bankExt: 0, hitBots: new Set() };
   return true;
@@ -269,8 +263,6 @@ function extendBulletTime(run, sec) {
 // 子弹时间结束时调用，返回本次统计
 export function endBulletTime(run) {
   const bt = run.bt || { kills: 0, dmg: 0, hitBots: new Set() };
-  if (has(run, 'echo') && bt.kills >= 3) run.focus = Math.min(focusMax(run), focusMax(run) * 0.3);
-  if (has(run, 'timedebt')) run.debtTime = run.focusTotal;
   run.bt = null;
   return bt;
 }
@@ -352,6 +344,8 @@ export function takeDamage(run, dmg) {
   // 背水：受到的伤害 −x%，生命低于 40% 时翻倍
   const grit = cv(run, 'v_grit') / 100;
   if (grit) dmg *= 1 - (run.hp < run.maxHp * 0.4 ? grit * 2 : grit);
+  // 老兵：从第 6 波开始减伤
+  if (run.waveIndex >= 5) dmg *= 1 - cv(run, 'v_aid') / 100;
   dmg = Math.round(dmg);
   run.hp = Math.max(0, run.hp - dmg);
   run.stats.damageTaken += dmg;
@@ -359,9 +353,10 @@ export function takeDamage(run, dmg) {
   dropTier(run);
   // 应急护盾：每波第一次降到 40% 以下，获得 2 层护盾
   if (has(run, 'emergency') && !run.emergencyUsed && run.hp > 0 && run.hp < run.maxHp * 0.4) { run.emergencyUsed = true; run.shield += 2; }
-  if (run.hp <= 0 && hasCard(run, 'v_death') && !run.reviveUsed) {
+  if (run.hp <= 0 && run.revivesLeft > 0) {
+    run.revivesLeft--;
     run.reviveUsed = true;
-    run.hp = Math.round(run.maxHp * cv(run, 'v_death') / 100);
+    run.hp = Math.round(run.maxHp * 0.5);
     return { absorbed: false, dead: false, revived: true };
   }
   return { absorbed: false, dead: run.hp <= 0 };
@@ -390,16 +385,13 @@ export function startWave(run) {
   run.ammo = magSize(run);
   run.reloadLeft = 0;
   run.focusTime = 0;
-  run.debtTime = 0;
   run.bt = null;
   run.heat = 0;
   run.sprayTime = 0;
   run.beltAcc = 0;
   run.rating.idle = 0;
-  if (hasCard(run, 'w_full')) {
-    run.shield = Math.max(run.shield, 1);
-    run.hp = Math.min(run.maxHp, run.hp + cv(run, 'w_full'));
-  }
+  // 时之沙：每波开始专注 +x%
+  if (hasCard(run, 't_badge')) run.focus = Math.min(focusMax(run), run.focus + focusMax(run) * cv(run, 't_badge') / 100);
   // 护盾强化：每波开始把护盾补到等级数（不会跨波无限累积）
   if (has(run, 'guard')) run.shield = Math.max(run.shield, lv(run, 'guard'));
   if (keepsakeIs(run, 'watch')) run.focus = Math.min(focusMax(run), run.focus + focusMax(run) * 0.3);
@@ -412,15 +404,17 @@ export function finishWave(run) {
   run.waveIndex++;
   run.wavesSinceCore++;
   run.focusTime = 0;
-  run.debtTime = 0;
   run.bt = null;
   run.ratingScore += run.rating.tier;
-  const heal = 5 * lv(run, 'bandage') + cv(run, 'v_aid');
+  const heal = 5 * lv(run, 'bandage');
   if (heal) run.hp = Math.min(run.maxHp, run.hp + heal);
   // 临时效果倒数；进入新区域送一个命运骰
   run.temp = run.temp.map((t) => ({ ...t, waves: t.waves - 1 })).filter((t) => t.waves > 0);
   if (SHOP.shopAfter.includes(run.waveIndex)) {
     run.rerolls += SHOP.rerollTokensPerRegion;
+    // 磨砺：每打完一个区域，生命上限 +x 并回复
+    const grow = cv(run, 'v_shield');
+    if (grow) { run.maxHp += grow; run.hp += grow; }
     if (hasCard(run, 'w_few')) giftCards(run, cv(run, 'w_few'));
   }
 }
@@ -438,6 +432,7 @@ export function giftCards(run, n) {
     if (c.id === 'v_body') { run.maxHp += v; run.hp += v; }
     if (c.id === 'e_stake') run.gold += v;
     if (c.id === 'e_fate') run.rerolls += v;
+    if (c.id === 'v_death') run.revivesLeft += v;
   }
   run.gifted.push(...got);
   run.lastGifted = got;
@@ -607,7 +602,7 @@ export function upgradePrice(run, id) {
   const u = UPGRADES[id];
   const P = SHOP.upgradePrice;
   const base = u.cat === 'base' ? P.base + P.baseStep * lv(run, id) : P[u.cat];
-  return Math.round(base * priceScale(run) * (has(run, 'membercard') ? SHOP.discount : 1));
+  return Math.round(base * priceScale(run) * (has(run, 'membercard') ? SHOP.discount : 1) * (1 - cv(run, 'e_supply') / 100));
 }
 
 export function stardustPrice(run) {
