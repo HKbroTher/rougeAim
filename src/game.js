@@ -537,6 +537,14 @@ export class Game {
       if (run.ammo <= 0) this.tryReload(false);
     }
     R.tickFire(run, dt, canFire);
+    // 跟枪护盾：本波持续开火累计 4 秒
+    if (canFire) run.waveFireTime += dt;
+    if (R.has(run, 'trackshield') && !run.trackShieldUsed && run.waveFireTime >= 4) {
+      run.trackShieldUsed = true;
+      run.shield++;
+      sfx.shield();
+      this.floatCenter('跟枪护盾 +1', 'info');
+    }
 
     if (this.state !== 'combat') return;
     this.ui.updateHud(run, `${this.waveDef.name} / ${WAVES.length}`, this.bots.length + this.spawnQueue.length, { flick: this.flickReady });
@@ -585,10 +593,7 @@ export class Game {
       ec.at = this.time;
       execBonus = ec.bonus;
     }
-    // 持续命中同一个目标（跟枪护盾）：两次命中间隔 < 0.35 秒就累计时间，中间打空不打断
-    const gap = this.time - (bot.lastHitAt ?? -9);
-    bot.trackTime = gap < 0.35 ? (bot.trackTime || 0) + gap : 0;
-    bot.lastHitAt = this.time;
+    bot.lastHitAt = this.time; // 压制火力：1 秒没被命中就恢复
     bot.hitsTaken = (bot.hitsTaken || 0) + 1;
 
     const dmg = this.shotDamage(bot, head, { flick, calm, execBonus });
@@ -599,12 +604,6 @@ export class Game {
     if (run.bt) run.bt.hitBots.add(bot);
 
     if (R.has(run, 'suppress')) bot.suppress = Math.min(5, (bot.suppress || 0) + 1);
-    if (R.has(run, 'trackshield') && !run.trackShieldUsed && bot.trackTime >= 2) {
-      run.trackShieldUsed = true;
-      run.shield++;
-      sfx.shield();
-      this.floatCenter('跟枪护盾 +1', 'info');
-    }
     const fullHeat = R.has(run, 'overheat') && run.heat >= 20;
     if (fullHeat) bot.burn = { left: 2, acc: 0 };
 
@@ -692,11 +691,11 @@ export class Game {
     if (bot.dead) return;
     const run = this.run;
     let base = bot.def.gold;
-    if (ctx.onetap && R.has(run, 'bounty')) base += 2;
+    if (R.has(run, 'bounty')) base += (ctx.head && !ctx.indirect ? 1 : 0) + (ctx.onetap ? 2 : 0);
     if (ctx.onetap) base *= 1 + R.cv(run, 'h_flick') / 100;
     const glance = ctx.head && R.has(run, 'glance') && bot.offscreenAt != null && this.time - bot.offscreenAt <= 1;
     const gold = R.killGold(run, base, glance ? 2 : 1);
-    if (ctx.onetap && R.has(run, 'onetap')) R.refundAmmo(run, 2);
+    if (R.has(run, 'onetap') && ctx.head && !ctx.indirect) R.refundAmmo(run, ctx.onetap ? 3 : 1);
     R.onKillInBulletTime(run);
     const pos = bot.headWorld;
     this.world.fx.burst(pos, bot.def.color, bot.type === 'heavy' ? 26 : 14);

@@ -33,8 +33,8 @@ export const UPGRADES = {
     desc: '爆头倍率 ×1.5 → ×3（一枪爆头带走普通兵）；身体伤害 −50%。' },
   precision: { cat: 'school', school: 'head', set: '处决', icon: '⌖', name: '精确打击', desc: '爆头倍率 +0.75。' },
   lethal: { cat: 'school', school: 'head', set: '处决', icon: '✜', name: '致命精度', desc: '爆头伤害 +1.5。' },
-  onetap: { cat: 'school', school: 'head', set: '处决', icon: '⤴', name: '一击回收', desc: '满血目标被一枪打死时，返还 2 发子弹。' },
-  bounty: { cat: 'school', school: 'head', set: '处决', icon: '💰', name: '斩首赏金', desc: '一枪击杀的目标，基础金币 +2。' },
+  onetap: { cat: 'school', school: 'head', set: '处决', icon: '⤴', name: '一击回收', desc: '爆头击杀返还 1 发子弹；一枪打死满血目标返还 3 发。' },
+  bounty: { cat: 'school', school: 'head', set: '处决', icon: '💰', name: '斩首赏金', desc: '爆头击杀基础金币 +1；一枪打死满血目标再 +2。' },
   // ② 连锁：一发子弹打多个目标
   pierce: { cat: 'core', school: 'head', set: '连锁', icon: '⇶', name: '穿颅弹', locked: true,
     desc: '爆头后子弹继续飞，最多再穿 2 个目标（伤害 ×0.75）；穿透再爆头可以继续穿。' },
@@ -69,7 +69,7 @@ export const UPGRADES = {
     desc: '每命中一个目标让它减速 8%（最多 40%）；它 1 秒没被命中就恢复。打空不影响。' },
   rend: { cat: 'school', school: 'spray', set: '压制', icon: '⫽', name: '撕裂', desc: '每个目标被命中的第 3、6、9……发，伤害 ×2.5。' },
   shred: { cat: 'school', school: 'spray', set: '压制', icon: '⛏', name: '碎甲', desc: '被命中 ≥ 2 次的目标受到的伤害 +1；对重甲兵伤害 +50%。' },
-  trackshield: { cat: 'school', school: 'spray', set: '压制', icon: '⛉', name: '跟枪护盾', desc: '持续命中同一目标累计 2 秒，获得 1 层护盾（每波一次）。' },
+  trackshield: { cat: 'school', school: 'spray', set: '压制', icon: '⛉', name: '跟枪护盾', desc: '本波持续开火累计 4 秒，获得 1 层护盾（每波一次，打空也算）。' },
   steady: { cat: 'school', school: 'spray', set: '压制', icon: '▬', name: '稳定火力', desc: '火力评级不再随时间回落，打空也不扣进度。' },
 
   // ---------------- 子弹时间流：爆发窗口 ----------------

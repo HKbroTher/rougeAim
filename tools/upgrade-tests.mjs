@@ -110,6 +110,16 @@ const results = await page.evaluate(async () => {
   run = fresh({ shred: 1 });
   check('碎甲：重甲兵第 2 次命中起 (2+1)×1.5', g.shotDamage({ ...dummy('heavy'), hitsTaken: 2 }, false) === 4.5);
 
+  run = fresh({ trackshield: 1 });
+  check('跟枪护盾：按本波持续开火时间算', run.waveFireTime === 0 && 'waveFireTime' in run);
+  // 名字不重名：命盘卡牌 vs 局内强化
+  {
+    const cfg0 = await import('./src/config.js');
+    const upNames = new Set(Object.values(UPGRADES).map((u) => u.name));
+    const clash = cfg0.CARDS.filter((c) => upNames.has(c.name)).map((c) => c.name);
+    check('命盘卡牌和局内强化没有重名', clash.length === 0, clash);
+  }
+
   // ---- 子弹时间流 ----
   run = fresh({ stasis: 1 }, { focus: 20 });
   R.activateFocus(run);

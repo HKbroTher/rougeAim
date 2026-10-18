@@ -37,6 +37,7 @@ export function createRun(save) {
     sprayTime: 0,    // 持续开火时长（过热、弹链、预热）
     beltAcc: 0,
     trackShieldUsed: false,
+    waveFireTime: 0,   // 本波持续开火的累计时间（跟枪护盾）
     execChain: { botId: null, at: -9, bonus: 0 },
     ups: {},         // 强化 id -> 等级
     keepsake,
@@ -375,6 +376,7 @@ export function startWave(run) {
   run.waveLog.push({ wave: run.waveIndex + 1, start: snapshot(run) });
   run.safetyUsed = false;
   run.trackShieldUsed = false;
+  run.waveFireTime = 0;
   run.ammo = magSize(run);
   run.reloadLeft = 0;
   run.focusTime = 0;
