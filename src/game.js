@@ -714,7 +714,7 @@ export class Game {
       d += R.cv(run, 'h_aim');
       d *= 1 + R.cv(run, 'h_pierce') / 100;
       if (bot.distance > 12) d *= 1 + R.cv(run, 'h_badge') / 100;      // 狙击手
-      if (R.inBulletTime(run) && R.has(run, 'timeblade')) d *= 1.5;   // 时之刃
+      if (R.inBulletTime(run) && R.has(run, 'timeblade')) d *= 1.7;   // 时之刃
       d += execBonus;
       if (R.has(run, 'hawkeye') && bot.distance > 15) d *= 1.5;
       if (flick) d *= 2;
@@ -724,7 +724,7 @@ export class Game {
     }
     if (calm) d *= 2;
     d *= R.tempDamageMul(run);
-    if (R.inBulletTime(run) && R.has(run, 'freezeframe')) d *= 1.4;
+    if (R.inBulletTime(run) && R.has(run, 'freezeframe')) d *= 1.5;
     if (R.inBulletTime(run)) d *= 1 + R.cv(run, 't_stasis') / 100;
     if (run.sprayTime > 1) d *= 1 + R.cv(run, 's_badge') / 100;       // 火力延续
     d *= 1 + R.cv(run, 'w_full') / 100;                                // 同心

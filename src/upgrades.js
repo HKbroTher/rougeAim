@@ -76,7 +76,7 @@ export const UPGRADES = {
   // ① 时停
   stasis: { cat: 'core', school: 'time', set: '时停', icon: '⏸', name: '时停', locked: true,
     desc: '子弹时间变为 1.2 秒，敌人完全静止。其他强化的时长加成只按一半生效。' },
-  freezeframe: { cat: 'school', school: 'time', set: '时停', icon: '▣', name: '定格', desc: '子弹时间中所有伤害 +40%。' },
+  freezeframe: { cat: 'school', school: 'time', set: '时停', icon: '▣', name: '定格', desc: '子弹时间中所有伤害 +50%。' },
   timebank: { cat: 'school', school: 'time', set: '时停', icon: '⏳', name: '时间余量', desc: '子弹时间中每造成 10 点伤害，时长 +0.15 秒（每次最多 +1.5 秒）。' },
   nowaste: { cat: 'school', school: 'time', set: '时停', icon: '⇉', name: '零损耗', desc: '子弹时间中，打空的子弹不消耗弹药。' },
   chill: { cat: 'school', school: 'time', set: '时停', icon: '❄', name: '冻结弹', desc: '子弹时间中被命中的敌人，本次子弹时间内移动速度再 −50%。' },
@@ -90,7 +90,7 @@ export const UPGRADES = {
   blink: { cat: 'core', school: 'time', set: '高频', icon: '⧖', name: '瞬时', locked: true,
     desc: '专注分成 4 格：每攒满 1 格就能释放 1 秒子弹时间，子弹时间中可以继续释放来延长。' },
   fragment: { cat: 'school', school: 'time', set: '高频', icon: '◔', name: '碎片化', desc: '子弹时间时长减半，充满专注所需点数也减半。' },
-  timeblade: { cat: 'school', school: 'time', set: '高频', icon: '↝', name: '时之刃', desc: '子弹时间中爆头伤害 +50%。' },
+  timeblade: { cat: 'school', school: 'time', set: '高频', icon: '↝', name: '时之刃', desc: '子弹时间中爆头伤害 +70%。' },
   overclock: { cat: 'school', school: 'time', set: '高频', icon: '⚡', name: '加速世界', desc: '子弹时间中射速 +30%。' },
 
   // ---------------- 通用 ----------------

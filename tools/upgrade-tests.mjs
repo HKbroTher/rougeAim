@@ -147,7 +147,7 @@ const results = await page.evaluate(async () => {
   check('时间余量：每 10 伤害 +0.15 秒', near(run.focusTime, 4.3), run.focusTime);
   run = fresh({ timeblade: 1 }, { focus: 20 });
   R.activateFocus(run);
-  check('时之刃：子弹时间中爆头伤害 +50%', near(g.shotDamage(dummy(), true), 4.5));
+  check('时之刃：子弹时间中爆头伤害 +70%', near(g.shotDamage(dummy(), true), 5.1));
   const timeUps = Object.entries(UPGRADES).filter(([, u]) => u.school === 'time').map(([, u]) => u.desc).join('');
   check('时间流强化里没有「结束后」的效果', !/结束(后|时)/.test(timeUps));
   run = fresh({ reloadmoment: 1 }, { focus: 20 });
@@ -157,7 +157,7 @@ const results = await page.evaluate(async () => {
   check('装填时刻：释放子弹时间时弹匣立刻装满', run.ammo === 10 && !R.reloading(run));
   run = fresh({ freezeframe: 1 }, { focus: 20 });
   R.activateFocus(run);
-  check('定格：子弹时间中伤害 +40%', near(g.shotDamage(dummy(), false), 2.8));
+  check('定格：子弹时间中伤害 +50%', near(g.shotDamage(dummy(), false), 3));
   run = fresh({ timeslit: 1 }, { focus: 20 });
   R.activateFocus(run);
   run.ammo = 0;
