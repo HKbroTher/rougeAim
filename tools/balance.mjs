@@ -41,40 +41,36 @@ async function playOne(i) {
         const btns = [...document.querySelectorAll('[data-action=pick]')];
         const pref = btns.filter((b) => b.dataset.school === window.__school);
         const pool = pref.length ? pref : btns;
+        // 没有本流派的选项时，有骰子就刷新一次
+        if (window.__school && window.__school !== 'random' && !pref.length && game.run.rerolls > 0 && !window.__rr) { window.__rr = true; game.onAction('rerollReward', {}); return; }
+        window.__rr = false;
         pool[Math.floor(Math.random() * pool.length)].click();
       });
-    } else if (state === 'merchant') {
-      // 选商人：血量低先找医生，其次黑市（流派）/ 铁匠，最后星尘商
-      await page.evaluate(() => {
-        const r = game.run;
-        const opts = [...document.querySelectorAll('[data-action=visitMerchant]')].map((b) => b.dataset.id);
-        const order = r.hp / r.maxHp < 0.55 ? ['doctor', 'blackmarket', 'blacksmith', 'stardust'] : ['blackmarket', 'blacksmith', 'doctor', 'stardust'];
-        const pick = order.find((id) => opts.includes(id));
-        game.onAction('visitMerchant', { id: pick });
-      });
     } else if (state === 'shop') {
-      // 简单的「普通玩家」购物策略：医生处治疗到 70%；铁匠 / 黑市能买几个买几个（优先本流派），
-      // 没有想要的且钱多就刷新一次；星尘商有余钱就兑换
+      // 简单的「普通玩家」购物策略：治疗到 70%；尽量买强化（优先本流派），没有想要的就用骰子 / 金币刷新一次；
+      // 卡戎之井买护盾和增益；最后有余钱买生命之心和星尘
       await page.evaluate(() => {
         const r = game.run;
         const q = (sel) => [...document.querySelectorAll(sel)].filter((b) => !b.disabled);
         for (let k = 0; k < 4 && r.hp / r.maxHp < 0.7; k++) {
-          const h = q('[data-action=buyService][data-kind=heal]')[0] || (r.hp / r.maxHp < 0.4 && q('[data-action=buyService][data-kind=fullheal]')[0]);
+          const h = q('[data-action=buyGood][data-kind=heal]')[0] || q('[data-action=buyGood][data-kind=ration]')[0];
           if (!h) break;
           h.click();
         }
-        const sh = q('[data-action=buyService][data-kind=shield]')[0];
-        if (sh) sh.click();
         let rerolled = false;
         for (let k = 0; k < 4; k++) {
           const items = q('[data-action=buyItem]');
           const want = items.find((b) => b.dataset.school === window.__school) || items.find((b) => b.dataset.cat === 'base') || items[0];
           if (want) { want.click(); continue; }
-          const rr = q('[data-action=reroll]')[0];
-          if (!rerolled && rr && document.querySelectorAll('[data-action=buyItem]:not(.sold)').length) { rr.click(); rerolled = true; continue; }
+          const left = document.querySelectorAll('[data-action=buyItem]:not(.sold)').length;
+          const rr = q('[data-action=rerollShop][data-token="1"]')[0] || q('[data-action=rerollShop][data-token="0"]')[0];
+          if (!rerolled && left && rr) { rr.click(); rerolled = true; continue; }
           break;
         }
-        for (const kind of ['stardustBulk', 'stardust']) { const b = q(`[data-action=buyService][data-kind=${kind}]`)[0]; if (b) b.click(); }
+        for (const kind of ['aegis', 'wrath', 'greed', 'dice', 'surge', 'ammo', 'heart', 'stardust']) {
+          const b = q(`[data-action=buyGood][data-kind=${kind}]`)[0];
+          if (b) b.click();
+        }
         game.onAction('leaveShop', {});
       });
     }
@@ -94,7 +90,7 @@ async function playOne(i) {
         acc: w.end && w.end.shots - w.start.shots ? (w.end.hits - w.start.hits) / (w.end.shots - w.start.shots) : null,
         gold: w.end ? w.end.gold - w.start.gold : 0,
       })),
-      shops: r.shopVisits.map((v) => ({ merchant: v.merchant, wave: v.wave, goldIn: v.goldIn, bought: v.purchases.filter((p) => p.kind === 'upgrade').length, left: v.goldOut, prices: v.offered.items })),
+      shops: r.shopVisits.map((v) => ({ merchant: v.kind, wave: v.wave, goldIn: v.goldIn, bought: v.purchases.filter((p) => p.kind === 'upgrade').length, left: v.goldOut, prices: v.offered.items })),
     };
   });
   await ctx.close();
@@ -125,7 +121,7 @@ const hurt = {};
 for (const r of results) for (const [k, v] of Object.entries(r.hurtBy)) hurt[k] = (hurt[k] || 0) + v;
 const hurtTotal = Object.values(hurt).reduce((a, b) => a + b, 0) || 1;
 console.log(`被碰到的来源（共 ${hurtTotal} 次）：${Object.entries(hurt).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${Math.round((v / hurtTotal) * 100)}%`).join('，')}`);
-// 商人：按拜访顺序统计；「可买」只对铁匠 / 黑市有意义
+// 商店：按出现顺序统计（shop = 卡戎商店，well = 卡戎之井）；「可买」只对卡戎商店有意义
 const byShop = {};
 for (const r of results) r.shops.forEach((sh, i) => { (byShop[i + 1] ||= []).push(sh); });
 for (const [n, arr] of Object.entries(byShop)) {
@@ -133,7 +129,7 @@ for (const [n, arr] of Object.entries(byShop)) {
   const avgPrice = avg(up.flatMap((x) => x.prices));
   const types = {};
   for (const x of arr) types[x.merchant] = (types[x.merchant] || 0) + 1;
-  console.log(`第 ${n} 次商人（${arr.length} 局，平均第 ${avg(arr.map((x) => x.wave)).toFixed(1)} 波后，${Object.entries(types).map(([k, v]) => `${k}×${v}`).join(' ')}）：进店金币 ${avg(arr.map((x) => x.goldIn)).toFixed(0)}` +
+  console.log(`第 ${n} 次商店（${arr.length} 局，平均第 ${avg(arr.map((x) => x.wave)).toFixed(1)} 波后，${Object.entries(types).map(([k, v]) => `${k}×${v}`).join(' ')}）：进店金币 ${avg(arr.map((x) => x.goldIn)).toFixed(0)}` +
     (up.length ? `，强化均价 ${avgPrice.toFixed(0)}，可买 ${(avg(up.map((x) => x.goldIn)) / avgPrice).toFixed(2)} 个，实际买 ${avg(up.map((x) => x.bought)).toFixed(2)} 个` : '') + `，剩 ${avg(arr.map((x) => x.left)).toFixed(0)}`);
 }
 console.log('\n波 | 到达局数 | 平均掉血 | 平均命中 | 平均收入');

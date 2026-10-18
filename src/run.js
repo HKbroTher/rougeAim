@@ -1,5 +1,5 @@
 // 单局状态与规则（不依赖渲染，便于单测和平衡模拟）。
-import { PLAYER, WEAPON, COMBO, FOCUS, SHOP, WAVES, KEEPSAKES, MERCHANTS, MERCHANT_EVENT } from './config.js';
+import { PLAYER, WEAPON, COMBO, FOCUS, SHOP, WAVES, KEEPSAKES, WELL, WELL_ITEMS } from './config.js';
 import { UPGRADES, BASE_MAX_LEVEL } from './upgrades.js';
 import { upgradeLevel, unlockedUpgrades, keepsakeLevel } from './meta.js';
 
@@ -34,7 +34,8 @@ export function createRun(save) {
     extraChoice: upgradeLevel(save, 'extraChoice') > 0,
     waveIndex: 0,
     wavesSinceCore: 0,
-    wavesSinceMerchant: 0,
+    rerolls: SHOP.rerollTokensStart + upgradeLevel(save, 'fates'), // 命运骰
+    temp: [],        // 卡戎之井的临时效果：{ id, waves }
     rewardsTaken: 0,
     healBuys: 0,
     stardustBuys: 0,
@@ -51,6 +52,8 @@ export function createRun(save) {
 }
 
 export const lv = (run, id) => run.ups[id] || 0;
+export const hasTemp = (run, id) => run.temp.some((t) => t.id === id);
+export const tempDamageMul = (run) => (hasTemp(run, 'wrath') ? 1.2 : 1);
 export const has = (run, id) => lv(run, id) > 0;
 export const keepsakeIs = (run, id, minLv = 1) => run.keepsake === id && run.keepsakeLv >= minLv;
 export const inBulletTime = (run) => run.focusTime > 0;
@@ -72,6 +75,7 @@ export function magSize(run) {
   let m = has(run, 'drum') ? 24 : WEAPON.magSize;
   m += 2 * lv(run, 'mag');
   if (keepsakeIs(run, 'drum')) m += 3;
+  if (hasTemp(run, 'ammo')) m += 4;
   return m;
 }
 
@@ -258,6 +262,7 @@ export function killGold(run, base, extraMul = 1) {
   const mult = multiplier(run);
   const goldMult = 1 + (mult - 1) * COMBO.goldMultScale;
   let g = base * goldMult * extraMul * (1 + 0.08 * lv(run, 'fortune'));
+  if (hasTemp(run, 'greed')) g *= 1.4;
   if (has(run, 'greedsight') && mult >= 3) g *= 1.5;
   if (has(run, 'bloodpact')) g *= 1.4;
   const gold = Math.max(1, Math.round(g));
@@ -305,6 +310,7 @@ export function startWave(run) {
   // 护盾强化：每波开始把护盾补到等级数（不会跨波无限累积）
   if (has(run, 'guard')) run.shield = Math.max(run.shield, lv(run, 'guard'));
   if (keepsakeIs(run, 'watch')) run.focus = Math.min(focusMax(run), run.focus + focusMax(run) * 0.3);
+  if (hasTemp(run, 'surge')) run.focus = focusMax(run);
 }
 
 // 清完一波
@@ -315,6 +321,9 @@ export function finishWave(run) {
   run.debtTime = 0;
   run.bt = null;
   if (has(run, 'bandage')) run.hp = Math.min(run.maxHp, run.hp + 5 * lv(run, 'bandage'));
+  // 临时效果倒数；进入新区域送一个命运骰
+  run.temp = run.temp.map((t) => ({ ...t, waves: t.waves - 1 })).filter((t) => t.waves > 0);
+  if (SHOP.shopAfter.includes(run.waveIndex)) run.rerolls += SHOP.rerollTokensPerRegion;
 }
 
 export function enemySpeedMul(run) {
@@ -447,9 +456,10 @@ export function addUpgrade(run, id) {
   if (id === 'mag' || id === 'drum') run.ammo = magSize(run);
 }
 
-// ---------------- 商人 ----------------
-// 波次之间随机出现商人事件：给出两位不同的商人，玩家选一位拜访（也可以不拜访）。
-// 铁匠卖基础强化、黑市卖流派 / 核心强化、医生卖治疗、星尘商卖星尘；铁匠和黑市可以花金币刷新货架。
+// ---------------- 商店（参考 Hades 的卡戎） ----------------
+// 卡戎商店：每个区域结束（第 5、10、15 波后）固定出现，卖强化、基础强化、生命之心、治疗、星尘。
+// 卡戎之井：其余波次之间随机出现，3 件便宜的临时道具。
+// 命运骰：刷新免费三选一 / 商店货架 / 卡戎之井；卡戎商店还可以花金币刷新。
 
 // 价格随深度增长：第 3 波后为 1 倍，之后每 3 波 +1 倍（与收入增长同步）
 export function priceScale(run) {
@@ -465,12 +475,11 @@ export function healAmount(run) {
   return SHOP.healAmount + (has(run, 'clinic') ? 10 : 0);
 }
 
-export function upgradePrice(run, id, merchant = null) {
+export function upgradePrice(run, id) {
   const u = UPGRADES[id];
   const P = SHOP.upgradePrice;
   const base = u.cat === 'base' ? P.base + P.baseStep * lv(run, id) : P[u.cat];
-  const m = merchant ? MERCHANTS[merchant].priceMul || 1 : 1;
-  return Math.round(base * priceScale(run) * m * (has(run, 'membercard') ? SHOP.discount : 1));
+  return Math.round(base * priceScale(run) * (has(run, 'membercard') ? SHOP.discount : 1));
 }
 
 export function stardustPrice(run) {
@@ -484,93 +493,80 @@ export function stardustYield(run) {
   return Math.round(y * (has(run, 'starmap') ? 1.3 : 1));
 }
 
-export function rerollPrice(run, shop) {
-  return Math.round((SHOP.reroll.base + SHOP.reroll.step * shop.rerolls) * priceScale(run));
+export function goldRerollPrice(run, shop) {
+  return Math.round((SHOP.goldReroll.base + SHOP.goldReroll.step * shop.goldRerolls) * priceScale(run));
 }
 
-// 这一波打完之后有没有商人事件：保底机制，越久没遇到越容易遇到
-export function merchantChance(run) {
-  if (run.waveIndex < MERCHANT_EVENT.from) return 0;
-  return Math.min(1, MERCHANT_EVENT.base + MERCHANT_EVENT.perWave * run.wavesSinceMerchant);
+// 这一波打完之后：卡戎商店 / 卡戎之井 / 都没有
+export function isShopWave(run) {
+  return SHOP.shopAfter.includes(run.waveIndex);
 }
 
-export function rollMerchantEvent(run) {
-  run.wavesSinceMerchant++;
-  if (Math.random() >= merchantChance(run)) return null;
-  run.wavesSinceMerchant = 0;
-  const bag = Object.entries(MERCHANTS).map(([id, m]) => ({ id, w: m.weight }));
-  const out = [];
-  while (out.length < MERCHANT_EVENT.choices && bag.length) {
-    let r = Math.random() * bag.reduce((x, b) => x + b.w, 0);
-    let i = 0;
-    for (; i < bag.length - 1; i++) { r -= bag[i].w; if (r <= 0) break; }
-    out.push(bag[i].id);
-    bag.splice(i, 1);
-  }
-  return out;
+export function rollWell(run) {
+  return run.waveIndex >= WELL.from && !isShopWave(run) && Math.random() < WELL.chance;
 }
 
-// 货架：黑市 = 流派 / 通用 / 核心；铁匠 = 基础强化（不够时用通用补）
-function rollMerchantItems(run, merchant) {
+// 卡戎商店的强化货架：流派 / 通用（可能是核心或经济）+ 1 个基础强化
+function rollShopUpgrades(run) {
   const ids = [];
-  for (let i = 0; i < SHOP.slots; i++) {
+  for (let i = 0; i < SHOP.upgradeSlots; i++) {
     let id = null;
-    if (merchant === 'blackmarket') {
-      if (i === SHOP.slots - 1 && Math.random() < SHOP.econChance) id = pickOne(poolOf(run, (u) => u.cat === 'econ'));
-      if (!id && Math.random() < SHOP.coreInShop) id = rollKind(run, 'core', ids);
-      if (!id) id = rollKind(run, Math.random() < 0.75 ? 'school' : 'general', ids) || rollKind(run, 'school', ids) || rollKind(run, 'general', ids);
-    } else {
-      id = rollKind(run, 'base', ids) || rollKind(run, 'general', ids);
-    }
+    if (i === SHOP.upgradeSlots - 1 && Math.random() < SHOP.econChance) id = pickOne(poolOf(run, (u) => u.cat === 'econ'));
+    if (!id && Math.random() < SHOP.coreInShop) id = rollKind(run, 'core', ids);
+    if (!id) id = rollKind(run, Math.random() < 0.8 ? 'school' : 'general', ids) || rollKind(run, 'school', ids) || rollKind(run, 'general', ids);
     if (id && !ids.includes(id)) ids.push(id);
   }
+  const base = rollKind(run, 'base', ids);
+  if (base) ids.push(base);
   return ids;
 }
 
-// 医生、星尘商的服务
-function merchantServices(run, merchant) {
-  if (merchant === 'doctor') return [{ kind: 'heal' }, { kind: 'fullheal' }, { kind: 'shield' }];
-  if (merchant === 'stardust') return [{ kind: 'stardust' }, { kind: 'stardustBulk' }];
-  return [];
+function rollWellItems() {
+  return Object.keys(WELL_ITEMS).sort(() => Math.random() - 0.5).slice(0, WELL.slots);
 }
 
-export function servicePrice(run, svc) {
-  const k = priceScale(run);
-  if (svc.kind === 'heal') return healPrice(run);
-  if (svc.kind === 'fullheal') return Math.round(healPrice(run) * SHOP.fullHealMul);
-  if (svc.kind === 'shield') return Math.round(SHOP.shieldPrice * k);
-  if (svc.kind === 'stardust') return stardustPrice(run);
-  if (svc.kind === 'stardustBulk') return Math.round(stardustPrice(run) * SHOP.bulkPriceMul);
+export function wellPrice(run, id) {
+  return Math.round(WELL_ITEMS[id].price * WELL.priceMul * priceScale(run));
+}
+
+export function goodPrice(run, shop, id) {
+  if (shop.kind === 'well') return wellPrice(run, id);
+  if (id === 'heal') return healPrice(run);
+  if (id === 'heart') return Math.round(SHOP.heartPrice * priceScale(run));
+  if (id === 'stardust') return stardustPrice(run);
   return 0;
 }
 
-export function openShop(run, merchant) {
+// kind: 'shop' 卡戎商店 / 'well' 卡戎之井
+export function openShop(run, kind = 'shop') {
   run.shopCount++;
-  const ids = MERCHANTS[merchant].sellsUpgrades ? rollMerchantItems(run, merchant) : [];
-  const services = merchantServices(run, merchant);
-  return {
+  const shop = {
     number: run.shopCount,
-    merchant,
-    items: ids.map((id) => ({ id, sold: false })),
-    services: services.map((s) => ({ ...s, sold: false })),
-    rerolls: 0,
+    kind,
+    items: [],      // 强化：{ id, sold }
+    goods: [],      // 商店固定货品 / 卡戎之井道具：{ id, sold }
+    goldRerolls: 0,
     openedAt: performance.now(),
-    visit: {
-      wave: run.waveIndex,
-      shop: run.shopCount,
-      merchant,
-      goldIn: run.gold,
-      hpIn: run.hp,
-      maxHp: run.maxHp,
-      offered: {
-        items: ids.map((id) => upgradePrice(run, id, merchant)),
-        services: services.map((s) => servicePrice(run, s)),
-      },
-      purchases: [],
-      goldOut: 0,
-      timeMs: 0,
-    },
   };
+  if (kind === 'shop') {
+    shop.items = rollShopUpgrades(run).map((id) => ({ id, sold: false }));
+    shop.goods = ['heal', 'heart', 'stardust'].map((id) => ({ id, sold: false }));
+  } else {
+    shop.goods = rollWellItems().map((id) => ({ id, sold: false }));
+  }
+  shop.visit = {
+    wave: run.waveIndex,
+    shop: run.shopCount,
+    kind,
+    goldIn: run.gold,
+    hpIn: run.hp,
+    maxHp: run.maxHp,
+    offered: { items: shop.items.map((it) => upgradePrice(run, it.id)), goods: shop.goods.map((g) => goodPrice(run, shop, g.id)) },
+    purchases: [],
+    goldOut: 0,
+    timeMs: 0,
+  };
+  return shop;
 }
 
 function spend(run, shop, kind, price, extra = {}) {
@@ -581,7 +577,7 @@ function spend(run, shop, kind, price, extra = {}) {
 export function buyItem(run, shop, slot) {
   const item = shop.items[slot];
   if (!item || item.sold) return false;
-  const price = upgradePrice(run, item.id, shop.merchant);
+  const price = upgradePrice(run, item.id);
   if (run.gold < price) return false;
   spend(run, shop, 'upgrade', price, { id: item.id });
   item.sold = true;
@@ -589,51 +585,76 @@ export function buyItem(run, shop, slot) {
   return true;
 }
 
-export function canBuyService(run, shop, i) {
-  const svc = shop.services[i];
-  if (!svc || svc.sold) return false;
-  if ((svc.kind === 'heal' || svc.kind === 'fullheal') && run.hp >= run.maxHp) return false;
-  return run.gold >= servicePrice(run, svc);
+export function canBuyGood(run, shop, slot) {
+  const g = shop.goods[slot];
+  if (!g || g.sold) return false;
+  if ((g.id === 'heal' || g.id === 'ration') && run.hp >= run.maxHp) return false;
+  return run.gold >= goodPrice(run, shop, g.id);
 }
 
-export function buyService(run, shop, i) {
-  if (!canBuyService(run, shop, i)) return false;
-  const svc = shop.services[i];
-  const price = servicePrice(run, svc);
-  if (svc.kind === 'heal') {
-    spend(run, shop, 'heal', price, { hpBefore: run.hp });
-    run.hp = Math.min(run.maxHp, run.hp + healAmount(run));
-    run.healBuys++;
-  } else if (svc.kind === 'fullheal') {
-    spend(run, shop, 'heal', price, { hpBefore: run.hp, full: true });
-    run.hp = run.maxHp;
-    run.healBuys++;
-    svc.sold = true;
-  } else if (svc.kind === 'shield') {
-    spend(run, shop, 'shield', price);
-    run.shield++;
-    svc.sold = true;
+export function buyGood(run, shop, slot) {
+  if (!canBuyGood(run, shop, slot)) return false;
+  const g = shop.goods[slot];
+  const price = goodPrice(run, shop, g.id);
+  if (shop.kind === 'shop') {
+    if (g.id === 'heal') {
+      spend(run, shop, 'heal', price, { hpBefore: run.hp });
+      run.hp = Math.min(run.maxHp, run.hp + healAmount(run));
+      run.healBuys++;
+      return true; // 治疗可以连续买（越买越贵）
+    }
+    if (g.id === 'stardust') {
+      const amount = stardustYield(run);
+      spend(run, shop, 'stardust', price, { amount });
+      run.stardustBuys++;
+      run.stardustFromShop += amount;
+      return true; // 星尘可以连续买（越买越贵）
+    }
+    spend(run, shop, 'heal', price, { heart: true }); // 生命之心
+    run.maxHp += SHOP.heartHp;
+    run.hp += SHOP.heartHp;
+    g.sold = true;
+    return true;
+  }
+  // 卡戎之井：每件只能买一次
+  spend(run, shop, g.id === 'ration' || g.id === 'aegis' ? 'heal' : 'well', price, { id: g.id });
+  if (g.id === 'ration') run.hp = Math.min(run.maxHp, run.hp + 20);
+  else if (g.id === 'aegis') run.shield++;
+  else if (g.id === 'dice') run.rerolls++;
+  else run.temp.push({ id: g.id, waves: WELL_ITEMS[g.id].waves });
+  g.sold = true;
+  return true;
+}
+
+// 刷新：命运骰（任何商店）或金币（只在卡戎商店，每次涨价）。只刷新没买的格子。
+export function rerollShop(run, shop, useToken) {
+  if (useToken) {
+    if (run.rerolls <= 0) return false;
+    run.rerolls--;
+    shop.visit.purchases.push({ kind: 'reroll', price: 0, token: true });
   } else {
-    const bulk = svc.kind === 'stardustBulk';
-    const amount = Math.round(stardustYield(run) * (bulk ? SHOP.bulkYieldMul : 1));
-    spend(run, shop, 'stardust', price, { amount });
-    run.stardustBuys++;
-    run.stardustFromShop += amount;
-    if (bulk) svc.sold = true;
+    if (shop.kind !== 'shop') return false;
+    const price = goldRerollPrice(run, shop);
+    if (run.gold < price) return false;
+    spend(run, shop, 'reroll', price);
+    shop.goldRerolls++;
+  }
+  if (shop.kind === 'shop') {
+    const keep = shop.items.filter((it) => it.sold).map((it) => it.id);
+    const fresh = rollShopUpgrades(run).filter((id) => !keep.includes(id));
+    shop.items = shop.items.map((it) => (it.sold ? it : { id: fresh.shift() || it.id, sold: false }));
+  } else {
+    const keep = shop.goods.filter((g) => g.sold).map((g) => g.id);
+    const fresh = rollWellItems().filter((id) => !keep.includes(id));
+    shop.goods = shop.goods.map((g) => (g.sold ? g : { id: fresh.shift() || g.id, sold: false }));
   }
   return true;
 }
 
-// 刷新货架（只刷新没卖掉的格子），每次刷新价格上涨
-export function reroll(run, shop) {
-  if (!MERCHANTS[shop.merchant].sellsUpgrades) return false;
-  const price = rerollPrice(run, shop);
-  if (run.gold < price) return false;
-  spend(run, shop, 'reroll', price);
-  shop.rerolls++;
-  const keep = shop.items.filter((it) => it.sold).map((it) => it.id);
-  const fresh = rollMerchantItems(run, shop.merchant).filter((id) => !keep.includes(id));
-  shop.items = shop.items.map((it) => (it.sold ? it : { id: fresh.shift() || it.id, sold: false }));
+// 用命运骰刷新免费三选一
+export function useRerollToken(run) {
+  if (run.rerolls <= 0) return false;
+  run.rerolls--;
   return true;
 }
 

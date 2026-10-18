@@ -201,19 +201,18 @@ export class Game {
       case 'skipReward':
         this.afterReward();
         break;
-      case 'visitMerchant':
-        this.state = 'shop';
-        this.shop = R.openShop(this.run, data.id);
-        this.ui.shop(this.run, this.shop);
+      case 'buyGood':
+        this.shopResult(R.buyGood(this.run, this.shop, Number(data.slot)));
         break;
-      case 'skipMerchant':
-        this.startWave();
+      case 'rerollShop':
+        this.shopResult(R.rerollShop(this.run, this.shop, data.token === '1'));
         break;
-      case 'buyService':
-        this.shopResult(R.buyService(this.run, this.shop, Number(data.slot)));
-        break;
-      case 'reroll':
-        this.shopResult(R.reroll(this.run, this.shop));
+      case 'rerollReward':
+        // 命运骰：重新抽这一次的三选一
+        if (R.useRerollToken(this.run)) {
+          sfx.buy();
+          this.showReward(R.rollRewardChoices(this.run, 3, this.rewardInfo.opts), this.rewardInfo.title);
+        } else sfx.deny();
         break;
       case 'buyItem':
         this.shopResult(R.buyItem(this.run, this.shop, Number(data.slot)));
@@ -278,7 +277,8 @@ export class Game {
     if (!choices.length) { this.nextOpeningPick(); return; }
     this.rewardContext = 'start';
     this.state = 'reward';
-    this.ui.reward(this.run, choices, next.title);
+    this.rewardInfo = { title: next.title, opts: next.opts };
+    this.showReward(choices, next.title);
   }
 
   startWave() {
@@ -335,7 +335,8 @@ export class Game {
     this.state = 'reward';
     const choices = R.rollRewardChoices(run);
     if (!choices.length) { this.afterReward(); return; }
-    this.ui.reward(run, choices, `${WAVES[run.waveIndex - 1].name} 清除 · 选择一个强化`);
+    this.rewardInfo = { title: `${WAVES[run.waveIndex - 1].name} 清除 · 选择一个强化`, opts: {} };
+    this.showReward(choices, this.rewardInfo.title);
   }
 
   afterReward() {
@@ -345,11 +346,17 @@ export class Game {
       return;
     }
     this.run.rewardsTaken++;
-    // 商人事件：随机出现两位商人，选一位拜访
-    const merchants = R.rollMerchantEvent(this.run);
-    if (!merchants) { this.startWave(); return; }
-    this.state = 'merchant';
-    this.ui.merchantChoice(this.run, merchants);
+    // 区域结束：卡戎商店；区域内：随机出现卡戎之井
+    const kind = R.isShopWave(this.run) ? 'shop' : R.rollWell(this.run) ? 'well' : null;
+    if (!kind) { this.startWave(); return; }
+    this.state = 'shop';
+    this.shop = R.openShop(this.run, kind);
+    this.ui.shop(this.run, this.shop);
+  }
+
+  showReward(choices, title) {
+    this.currentChoices = choices;
+    this.ui.reward(this.run, choices, title);
   }
 
   pause() {
@@ -610,6 +617,7 @@ export class Game {
     if (head && R.has(run, 'lethal')) d += 1;
     if (head) d += execBonus;
     if (calm) d *= 2;
+    d *= R.tempDamageMul(run);
     if (flick) d *= 3;
     if (R.has(run, 'overheat')) d *= 1 + 0.04 * run.heat;
     if (R.has(run, 'rend') && run.track.count % 4 === 0) d *= 3;

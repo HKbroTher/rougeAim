@@ -1,6 +1,6 @@
 // DOM 界面：HUD 与各个全屏界面。按钮通过 data-action 统一派发给 game。
 import { UPGRADES, SCHOOLS, CAT_LABEL, BASE_MAX_LEVEL } from './upgrades.js';
-import { META_UPGRADES, KEEPSAKES, BOTS, WAVES, FOCUS, SHOP, SETTLEMENT, WEAPON, MERCHANTS, MERCHANT_EVENT } from './config.js';
+import { META_UPGRADES, KEEPSAKES, BOTS, WAVES, FOCUS, SHOP, SETTLEMENT, WEAPON, WELL, WELL_ITEMS } from './config.js';
 import { upgradeLevel, nextUpgradeCost, keepsakeLevel, nextKeepsakeCost, shopStats } from './meta.js';
 import * as R from './run.js';
 import { gameSens, cm360, equivalents, GAME_YAW, FOV_PRESETS } from './sens.js';
@@ -8,7 +8,7 @@ import { gameSens, cm360, equivalents, GAME_YAW, FOV_PRESETS } from './sens.js';
 const $ = (id) => document.getElementById(id);
 
 const KIND_LABEL = { stat: '宽容度', talent: '开局选择', unlock: '解锁' };
-const SPEND_LABEL = { heal: '治疗', upgrade: '强化', stardust: '星尘', shield: '护盾', reroll: '刷新' };
+const SPEND_LABEL = { heal: '治疗', upgrade: '强化', stardust: '星尘', reroll: '刷新', well: '临时道具' };
 
 export class UI {
   constructor(onAction) {
@@ -213,8 +213,8 @@ export class UI {
       ${this.spendBlock(s)}
       <h3>当前价格</h3>
       <div class="small">回血 ${SHOP.healBasePrice}（每买一次 +${SHOP.healPriceStep}）· 强化 基础 ${SHOP.upgradePrice.base}（每级 +${SHOP.upgradePrice.baseStep}）/ 流派 ${SHOP.upgradePrice.school} / 通用 ${SHOP.upgradePrice.general} / 经济 ${SHOP.upgradePrice.econ} / 核心 ${SHOP.upgradePrice.core} ·
-        星尘 ${SHOP.stardustBasePrice}（每买一次 +${SHOP.stardustPriceStep}，兑换量 ${SHOP.stardustYieldBase}）· 刷新 ${SHOP.reroll.base} 起。
-        以上为第 3 波前后的价格，之后每 3 波 +1 倍。商人从第 ${MERCHANT_EVENT.from} 波后随机出现，平均约 2.5 波一次。</div>
+        星尘 ${SHOP.stardustBasePrice}（每买一次 +${SHOP.stardustPriceStep}，兑换量 ${SHOP.stardustYieldBase}）· 金币刷新 ${SHOP.goldReroll.base} 起。
+        以上为第 3 波前后的价格，之后每 3 波 +1 倍。卡戎商店在第 ${SHOP.shopAfter.join('、')} 波后出现；卡戎之井在其余波次后以 ${Math.round(WELL.chance * 100)}% 概率出现。</div>
       <div style="margin-top:14px"><button class="btn danger" data-action="clearLog">清空商店日志</button></div>`;
   }
 
@@ -347,63 +347,60 @@ export class UI {
         <p class="dim small">免费三选一。强化只会奖励精准，不会替你瞄准。</p>
         <div class="choices">${choices.map((id) => this.upgradeCard(id, run, { action: 'pick' })).join('')}</div>
         <div class="row"><div class="grow small dim">已有强化：${this.upgradeList(run)}</div>
+        <button class="btn" data-action="rerollReward" ${run.rerolls > 0 ? '' : 'disabled'}>🎲 命运骰刷新（剩 ${run.rerolls}）</button>
         <button class="btn ghost" data-action="skipReward">跳过</button></div>
       </div>`);
   }
 
-  // 商人事件：两位商人二选一
-  merchantChoice(run, merchants) {
-    const nextWave = WAVES[run.waveIndex];
-    this.show(`
-      <div class="card">
-        <div class="row"><h2 class="grow" style="margin:0">路上遇到了商人</h2><div class="goldtxt" style="font-size:24px">● ${run.gold}</div></div>
-        <p class="small dim">只能拜访其中一位。生命 ${run.hp}/${run.maxHp}${run.shield ? ` · 护盾 ${run.shield}` : ''} · 下一波：${nextWave.name}</p>
-        <div class="choices">${merchants.map((id) => {
-          const m = MERCHANTS[id];
-          return `<button class="item merchant m-${id}" data-action="visitMerchant" data-id="${id}">
-            <div class="icon">${m.icon}</div><div class="name">${m.name}</div><div class="desc">${m.desc}</div></button>`;
-        }).join('')}</div>
-        <div class="row"><div class="grow small dim">不拜访也可以，金币会留到下一次遇到商人。</div>
-          <button class="btn ghost" data-action="skipMerchant">直接进入${nextWave.name}</button></div>
-      </div>`);
-  }
-
-  serviceCard(run, shop, svc, i) {
-    const price = R.servicePrice(run, svc);
-    const ok = R.canBuyService(run, shop, i);
-    const full = (svc.kind === 'heal' || svc.kind === 'fullheal') && run.hp >= run.maxHp;
-    const sd = R.stardustYield(run);
-    const info = {
-      heal: ['✚', '治疗', `恢复 ${R.healAmount(run)} 点生命。${R.has(run, 'clinic') ? '价格不再上涨。' : '每次购买后涨价（整局累计）。'}`, 'heal'],
-      fullheal: ['❤', '回满生命', '生命直接回满。每次拜访限一次，也会让治疗涨价。', 'heal'],
-      shield: ['◈', '护盾 +1', '获得 1 层护盾（抵挡一次碰撞）。每次拜访限一次。', 'heal'],
-      stardust: ['✦', '兑换星尘', `获得 <span class="stardust">${sd} 星尘</span>，阵亡也保留。同一局越买越贵。`, 'star'],
-      stardustBulk: ['✧', '大宗兑换', `获得 <span class="stardust">${Math.round(sd * SHOP.bulkYieldMul)} 星尘</span>，更划算。每次拜访限一次。`, 'star'],
-    }[svc.kind];
-    const label = svc.sold ? '已售出' : full ? '满血' : `● ${price}`;
-    return `<button class="item ${info[3]} ${svc.sold ? 'sold' : ''}" data-action="buyService" data-slot="${i}" data-kind="${svc.kind}" ${ok ? '' : 'disabled'}>
-      <div class="icon">${info[0]}</div><div class="name">${info[1]}</div><div class="desc">${info[2]}</div>
+  goodCard(run, shop, g, i) {
+    const price = R.goodPrice(run, shop, g.id);
+    const ok = R.canBuyGood(run, shop, i);
+    let icon; let name; let desc; let cls = 'heal';
+    if (shop.kind === 'well') {
+      const w = WELL_ITEMS[g.id];
+      [icon, name, desc] = [w.icon, w.name, w.desc];
+      cls = g.id === 'dice' ? 'star' : 'well';
+    } else if (g.id === 'heal') {
+      [icon, name, desc] = ['🍖', '治疗', `恢复 ${R.healAmount(run)} 点生命。可以连续买，${R.has(run, 'clinic') ? '价格不再上涨。' : '越买越贵（整局累计）。'}`];
+    } else if (g.id === 'heart') {
+      [icon, name, desc] = ['❤', '生命之心', `生命上限 +${SHOP.heartHp}，并回复 ${SHOP.heartHp}。每家店限一个。`];
+    } else {
+      [icon, name, desc] = ['✦', '兑换星尘', `获得 <span class="stardust">${R.stardustYield(run)} 星尘</span>（局外货币），阵亡也保留。越深越划算，同一局越买越贵。`];
+      cls = 'star';
+    }
+    const full = (g.id === 'heal' || g.id === 'ration') && run.hp >= run.maxHp;
+    const label = g.sold ? '已售出' : full ? '满血' : `● ${price}`;
+    return `<button class="item ${cls} ${g.sold ? 'sold' : ''}" data-action="buyGood" data-slot="${i}" data-kind="${g.id}" ${ok ? '' : 'disabled'}>
+      <div class="icon">${icon}</div><div class="name">${name}</div><div class="desc">${desc}</div>
       <div class="price ${run.gold < price ? 'no' : ''}">${label}</div></button>`;
   }
 
+  // 卡戎商店 / 卡戎之井
   shop(run, shop) {
-    const m = MERCHANTS[shop.merchant];
+    const isShop = shop.kind === 'shop';
     const nextWave = WAVES[run.waveIndex];
     const nextCount = Object.values(nextWave.count).reduce((a, b) => a + b, 0);
-    const reroll = m.sellsUpgrades ? R.rerollPrice(run, shop) : null;
+    const goldReroll = isShop ? R.goldRerollPrice(run, shop) : null;
+    const temps = run.temp.map((t) => `${WELL_ITEMS[t.id].name}（剩 ${t.waves} 波）`).join('、');
     this.show(`
       <div class="card">
         <div class="row">
-          <h2 class="grow" style="margin:0">${m.icon} ${m.name}</h2>
+          <h2 class="grow" style="margin:0">${isShop ? '⚖ 卡戎商店' : '⛲ 卡戎之井'}</h2>
+          <div class="stardust" style="font-size:18px;margin-right:16px">🎲 ${run.rerolls}</div>
           <div class="goldtxt" style="font-size:24px">● ${run.gold}</div>
         </div>
-        <p class="small dim">${m.desc} · 生命 ${run.hp}/${run.maxHp}${run.shield ? ` · 护盾 ${run.shield}` : ''} · 下一波：${nextWave.name}，${nextCount} 个敌人</p>
+        <p class="small dim">${isShop ? '区域结束。强化、生命之心、治疗、星尘。' : '路边的小摊：便宜的临时道具，每件只能买一次。'}
+          生命 ${run.hp}/${run.maxHp}${run.shield ? ` · 护盾 ${run.shield}` : ''} · 下一波：${nextWave.name}，${nextCount} 个敌人</p>
         <div class="choices">
-          ${shop.items.map((it, i) => this.upgradeCard(it.id, run, { action: 'buyItem', slot: i, price: R.upgradePrice(run, it.id, shop.merchant), gold: run.gold, sold: it.sold })).join('')}
-          ${shop.services.map((svc, i) => this.serviceCard(run, shop, svc, i)).join('')}
+          ${shop.items.map((it, i) => this.upgradeCard(it.id, run, { action: 'buyItem', slot: i, price: R.upgradePrice(run, it.id), gold: run.gold, sold: it.sold })).join('')}
+          ${shop.goods.map((g, i) => this.goodCard(run, shop, g, i)).join('')}
         </div>
-        ${m.sellsUpgrades ? `<div class="row" style="margin-bottom:10px"><button class="btn" data-action="reroll" ${run.gold < reroll ? 'disabled' : ''}>⟳ 刷新货架 ● ${reroll}</button>
-          <span class="small dim">只刷新没买的格子，每次刷新涨价。本次已刷新 ${shop.rerolls} 次。</span></div>` : ''}
+        <div class="row" style="margin-bottom:10px">
+          <button class="btn" data-action="rerollShop" data-token="1" ${run.rerolls > 0 ? '' : 'disabled'}>🎲 命运骰刷新（剩 ${run.rerolls}）</button>
+          ${isShop ? `<button class="btn" data-action="rerollShop" data-token="0" ${run.gold < goldReroll ? 'disabled' : ''}>⟳ 金币刷新 ● ${goldReroll}</button>` : ''}
+          <span class="small dim">只刷新没买的${isShop ? '强化' : '道具'}。${isShop ? `金币刷新每次涨价，本店已刷新 ${shop.goldRerolls} 次。` : ''}</span>
+        </div>
+        ${temps ? `<p class="small" style="color:var(--gold)">生效中：${temps}</p>` : ''}
         <p class="small dim">已有强化：${this.upgradeList(run)}</p>
         <div class="row"><div class="grow small dim">本局已兑换星尘：<span class="stardust">${run.stardustFromShop}</span></div>
           <button class="btn primary" data-action="leaveShop">进入${nextWave.name}</button></div>
@@ -420,8 +417,8 @@ export class UI {
 
   results(run, summary, settlement) {
     const visits = run.shopVisits.map((v) => {
-      const buys = v.purchases.map((p) => `${p.kind === 'upgrade' ? UPGRADES[p.id].name : SPEND_LABEL[p.kind]}(${p.price})`).join('、') || '<span class="dim">什么都没买</span>';
-      return `<tr><td>${v.merchant ? MERCHANTS[v.merchant].name : `第 ${v.shop} 家`}</td><td>${v.hpIn}/${v.maxHp}</td><td>${v.goldIn}</td><td>${buys}</td><td>${v.goldOut}</td><td>${(v.timeMs / 1000).toFixed(1)}s</td></tr>`;
+      const buys = v.purchases.map((p) => `${p.kind === 'upgrade' ? UPGRADES[p.id].name : p.kind === 'well' ? WELL_ITEMS[p.id].name : p.token ? '命运骰刷新' : SPEND_LABEL[p.kind]}${p.price ? `(${p.price})` : ''}`).join('、') || '<span class="dim">什么都没买</span>';
+      return `<tr><td>${v.kind === 'well' ? '卡戎之井' : '卡戎商店'}（第 ${v.wave} 波后）</td><td>${v.hpIn}/${v.maxHp}</td><td>${v.goldIn}</td><td>${buys}</td><td>${v.goldOut}</td><td>${(v.timeMs / 1000).toFixed(1)}s</td></tr>`;
     }).join('');
     this.show(`
       <div class="card">
@@ -446,7 +443,7 @@ export class UI {
           <tr><td>商店兑换</td><td class="stardust">+${settlement.shop}</td></tr>
         </table>
         <h3>本局商店决策</h3>
-        ${visits ? `<table><tr><th>商人</th><th>进店生命</th><th>进店金币</th><th>购买</th><th>剩余</th><th>停留</th></tr>${visits}</table>` : '<p class="dim small">本局没有拜访过商人。</p>'}
+        ${visits ? `<table><tr><th>商店</th><th>进店生命</th><th>进店金币</th><th>购买</th><th>剩余</th><th>停留</th></tr>${visits}</table>` : '<p class="dim small">本局没有进过商店。</p>'}
         <p class="small dim">强化：${this.upgradeList(run)}${run.keepsake ? ` · 遗物：${KEEPSAKES.find((k) => k.id === run.keepsake).name} Lv${run.keepsakeLv}` : ''}</p>
         <div class="row" style="margin-top:16px">
           <button class="btn primary" data-action="start">再来一局</button>
@@ -507,7 +504,8 @@ export class UI {
   }
 
   renderUpgradeBar(run) {
-    $('relic-bar').innerHTML = Object.keys(run.ups).map((id) => {
+    const temps = run.temp.map((t) => `<div class="relic-chip temp" title="${WELL_ITEMS[t.id].name}：${WELL_ITEMS[t.id].desc}（剩 ${t.waves} 波）">${WELL_ITEMS[t.id].icon}<sub>${t.waves}</sub></div>`).join('');
+    $('relic-bar').innerHTML = temps + Object.keys(run.ups).map((id) => {
       const u = UPGRADES[id];
       const color = u.school ? SCHOOLS[u.school].color : '';
       const lvTag = u.cat === 'base' ? `<sub>${run.ups[id]}</sub>` : '';

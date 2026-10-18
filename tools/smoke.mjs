@@ -26,14 +26,12 @@ for (let i = 0; i < 3000; i++) {
   }
   if (state === 'reward') {
     await page.click('[data-action=pick]');
-  } else if (state === 'merchant') {
-    await page.click('[data-action=visitMerchant]');
   } else if (state === 'shop') {
     if (!shopShot) { await page.screenshot({ path: `${shots}/03-shop.png` }); shopShot = true; }
-    const buy = await page.$('[data-action=buyService]:not([disabled]), [data-action=buyItem]:not([disabled])');
-    if (buy) await buy.click();
-    const rr = await page.$('[data-action=reroll]:not([disabled])');
+    const rr = await page.$('[data-action=rerollShop]:not([disabled])');
     if (rr) await rr.click();
+    const buy = await page.$('[data-action=buyGood]:not([disabled]), [data-action=buyItem]:not([disabled])');
+    if (buy) await buy.click();
     await page.click('[data-action=leaveShop]');
   } else if (state === 'results') {
     break;

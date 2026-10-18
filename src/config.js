@@ -187,44 +187,52 @@ export function rollMove(wave, type) {
   return { mode, amp: 0 }; // stutter / lunge
 }
 
+// ---------------- 商店（参考 Hades 的卡戎） ----------------
+// 卡戎商店：每个区域（5 波）结束时固定出现；卡戎之井：其余波次之间随机出现，卖便宜的临时道具。
+// 命运骰：每局有限的刷新次数，可以刷新免费三选一、商店货架、卡戎之井。
 export const SHOP = {
+  shopAfter: [5, 10, 15],  // 第几波之后出现卡戎商店（区域结束）
   // 价格：下面是第 3 波前后的价格，之后每 3 波 +1 倍（与收入增长同步）
-  // 目标：两次商人之间攒下的金币，普通玩家大约买 2 个强化，高手买 2 个还有剩
   upgradePrice: { base: 55, baseStep: 18, school: 72, general: 64, econ: 55, core: 118 },
-  slots: 3,              // 铁匠 / 黑市的货架数
-  coreInShop: 0.2,       // 黑市每个货架换成核心的概率
-  econChance: 0.25,      // 黑市第 3 个货架换成经济强化的概率
-  reroll: { base: 15, step: 15 }, // 刷新货架：15、30、45……（× 深度倍数）
-  discount: 0.8,         // 「会员卡」折扣
-  // 医生
-  healAmount: 30,
+  upgradeSlots: 2,         // 流派 / 通用强化货架（每格有概率换成核心）
+  coreInShop: 0.15,
+  econChance: 0.25,        // 第 2 个强化货架换成经济强化的概率
+  discount: 0.8,           // 「会员卡」折扣
+  // 固定货品
+  healAmount: 40,          // 治疗（食物）
   healBasePrice: 40,
-  healPriceStep: 20,     // 每买一次治疗涨价（整局累计）
-  fullHealMul: 2.2,      // 回满 = 治疗价 × 2.2，每次拜访限一次
-  shieldPrice: 45,       // 护盾 +1，每次拜访限一次
-  // 星尘商：比同档强化贵，同一局越买越贵，越深兑换越多
+  healPriceStep: 20,       // 每买一次治疗涨价（整局累计）
+  heartHp: 15,             // 生命之心：生命上限 +15 并回复 15
+  heartPrice: 60,
+  // 星尘：同一局越买越贵，越深兑换越多
   stardustBasePrice: 70,
   stardustPriceStep: 30,
   stardustYieldBase: 30,
   stardustDepthBonus: 0.12,
-  bulkPriceMul: 1.7,     // 大宗兑换：1.7 倍价格换 2.2 倍星尘，每次拜访限一次
-  bulkYieldMul: 2.2,
+  // 刷新：命运骰（免费）或金币（只在卡戎商店，每次涨价）
+  rerollTokensStart: 2,    // 每局开局的命运骰
+  rerollTokensPerRegion: 1, // 每进入新区域（第 5、10、15 波后）+1
+  goldReroll: { base: 20, step: 20 },
 };
 
-// 商人：波次之间随机出现，一次给出两位不同的商人，选一位拜访
-export const MERCHANTS = {
-  blacksmith: { name: '铁匠', icon: '⚒', weight: 1, sellsUpgrades: true, priceMul: 0.8,
-    desc: '基础强化 8 折（可升级已有的），可花金币刷新货架。' },
-  blackmarket: { name: '黑市商人', icon: '🕶', weight: 1.2, sellsUpgrades: true,
-    desc: '流派强化、通用强化，较高概率出现核心强化，可花金币刷新货架。' },
-  doctor: { name: '医生', icon: '⚕', weight: 1,
-    desc: '治疗 +30、回满生命、护盾 +1。' },
-  stardust: { name: '星尘商', icon: '✦', weight: 0.7,
-    desc: '用金币兑换星尘（局外货币），越深越划算。' },
+// 卡戎之井：区域内的波次之间随机出现，3 件临时道具，每件只能买一次
+export const WELL = {
+  from: 2,                 // 第 2 波之后才会出现
+  chance: 0.35,
+  slots: 3,
+  priceMul: 1,             // 价格同样随深度倍增
 };
 
-// 商人事件：第 from 波之后才会出现；每波出现概率 = base + perWave × 距上次遇到商人的波数（保底，平均约 2.5 波一次）
-export const MERCHANT_EVENT = { from: 2, base: 0, perWave: 0.2, choices: 2 };
+// 卡戎之井的临时道具（waves = 持续几波；0 = 立即生效）
+export const WELL_ITEMS = {
+  ration: { icon: '🍖', name: '战地口粮', price: 25, waves: 0, desc: '立即回复 20 生命。' },
+  aegis: { icon: '◈', name: '临时护盾', price: 35, waves: 0, desc: '立即获得 1 层护盾。' },
+  wrath: { icon: '🔥', name: '怒火药剂', price: 40, waves: 2, desc: '接下来 2 波，所有伤害 +20%。' },
+  greed: { icon: '💰', name: '金币契约', price: 35, waves: 2, desc: '接下来 2 波，击杀金币 +40%。' },
+  surge: { icon: '◑', name: '专注药剂', price: 30, waves: 1, desc: '下一波开局专注直接充满。' },
+  ammo: { icon: '▥', name: '扩容弹药箱', price: 30, waves: 3, desc: '接下来 3 波，弹匣 +4。' },
+  dice: { icon: '🎲', name: '命运骰', price: 40, waves: 0, desc: '获得 1 个命运骰（刷新次数）。' },
+};
 
 // 结算星尘：按技术表现而不是存活时间
 export const SETTLEMENT = {
@@ -241,6 +249,7 @@ export const META_UPGRADES = [
   { id: 'shield', kind: 'stat', name: '护盾发生器', desc: '每局开局获得 1 层护盾', costs: [180, 360] },
   { id: 'stake', kind: 'talent', name: '随身盘缠', desc: '开局携带 15 金币', costs: [150, 300] },
   { id: 'extraChoice', kind: 'talent', name: '开局补给', desc: '开局额外进行一次强化三选一', costs: [270] },
+  { id: 'fates', kind: 'talent', name: '命运之手', desc: '每局开局多 1 个命运骰（刷新次数）', costs: [150, 300] },
   // 核心强化解锁线：每个流派默认开放 1 个（断头台、弹鼓、余韵）
   { id: 'unlock_pierce', kind: 'unlock', name: '解锁：穿颅弹', desc: '爆头流核心「穿颅弹」进入奖池', costs: [200], unlocks: 'pierce' },
   { id: 'unlock_flickmaster', kind: 'unlock', name: '解锁：甩枪大师', desc: '爆头流核心「甩枪大师」进入奖池', costs: [250], unlocks: 'flickmaster' },
